@@ -1,0 +1,26 @@
+---
+galaxy_info:
+  namespace: click0
+  role_name: freebsd_install_on_zfs_lite
+  author: Vladislav V. Prodan
+  description: FreeBSD. Initial installation of the system on the ZFS root.
+  company: https://support.od.ua
+  github_branch: master
+  license: BSD
+  min_ansible_version: "2.11"
+  platforms:
+    - name: FreeBSD
+      versions:
+        - 11.3
+        - 12.1
+        - 12.2
+        - 12.3
+        - 13.0
+        - 13.1
+  galaxy_tags:
+    - freebsd
+    - install
+    - zfs
+dependencies: []
+collections: []
+...

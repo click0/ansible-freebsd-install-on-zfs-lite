@@ -1,0 +1,37 @@
+---
+
+fiozl_script_name: 'go11_4k.sh'
+fiozl_end_suffix: completed
+fiozl_tmux_tab_name: 'Install_FreeBSD'
+
+fiozl_provider: 'ada0'
+fiozl_swap_partition_size: '512M'
+fiozl_zfs_partition_size: ''  # full disk
+fiozl_poolname: 'zroot'
+fiozl_ashift: ''    # default - 4k, or 8k
+fiozl_hostname: ''
+fiozl_ftphost: 'http://otrada.od.ua/FreeBSD/snapshots/12.3/12.3-STABLE r372168 23-06-2022/' # url_dir (12.3)
+fiozl_mode: ''                # Single disk - stripe
+fiozl_distdir: ''
+fiozl_zoneinfo: ''
+fiozl_memdisksize: ''        # default - 350 MB
+fiozl_password: ''
+fiozl_gateway: 'auto'         # or IP or DHCP
+fiozl_ip: ''                  # 10.0.0.101/24
+
+# yaml syntax:
+# https://yaml-multiline.info/
+fiozl_script_options: '
+ -p \"{{ fiozl_provider }}\"
+ -s \"{{ fiozl_swap_partition_size }}\"
+ -S \"{{ fiozl_zfs_partition_size }}\"
+ -n \"{{ fiozl_poolname }}\"
+ -m \"{{ fiozl_mode }}\"
+ -d \"{{ fiozl_distdir }}\"
+ -f \"{{ fiozl_ftphost }}\"
+ -M \"{{ fiozl_memdisksize }}\"
+ -P \"{{ fiozl_password }}\"
+ -h \"{{ fiozl_hostname }}\"
+ -g \"{{ fiozl_gateway }}\"
+ -a \"{{ fiozl_ashift }}\"
+'

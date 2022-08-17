@@ -1,0 +1,12 @@
+---
+- name: Install the minimum required software for further work.
+  include: 0-pre-install.yml
+
+- name: Upload files
+  include: upload_files.yml
+
+- name: Install FreeBSD
+  include: install_freebsd.yml
+
+- name: Reboot the server
+  include: reboot.yml

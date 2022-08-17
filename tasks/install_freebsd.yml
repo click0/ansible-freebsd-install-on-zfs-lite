@@ -1,0 +1,12 @@
+---
+
+- name: Запускаем скрипт {{ fiozl_script_name }} в tmux
+  ansible.builtin.command: tmux new-session -d -s {{ fiozl_tmux_tab_name }} "sh {{ fiozl_script_name }} {{ fiozl_script_options }}; csh"
+
+- name: Wait until the file {{ fiozl_script_name }}.{{ fiozl_end_suffix }} is present before continuing
+  wait_for:
+    path: '/root/{{ fiozl_script_name }}.{{ fiozl_end_suffix }}'
+    state: present
+    delay: 10
+    timeout: 3600
+    msg: Timeout to find file {{ script_name }}.{{ end_suffix }}
