@@ -13,10 +13,6 @@ galaxy_info:
       versions:
         - 11.3
         - 12.1
-        - 12.2
-        - 12.3
-        - 13.0
-        - 13.1
   galaxy_tags:
     - freebsd
     - install
