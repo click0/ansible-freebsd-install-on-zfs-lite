@@ -72,3 +72,17 @@ ansible_python_interpreter=/usr/bin/python2
 ## Further use
 
 You may need [another role](https://galaxy.ansible.com/click0/mfsbsd_install_via_linux_lite/) that runs MfsBSD through a Linux host grub.  
+
+### Author:
+
+- Vladislav V. Prodan `<github.com/click0>`
+
+### 🤝 Contributing
+
+Contributions, issues and feature requests are welcome!<br />Feel free to check [issues page](https://github.com/click0/domain-check-2/issues).
+
+### Show your support
+
+Give a ⭐ if this project helped you!
+
+<a href="https://www.buymeacoffee.com/click0" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-orange.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
