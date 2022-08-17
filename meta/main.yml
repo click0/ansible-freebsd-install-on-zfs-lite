@@ -15,7 +15,9 @@ galaxy_info:
         - 12.1
   galaxy_tags:
     - freebsd
+    - system
     - install
+    - rescue
     - zfs
 dependencies: []
 collections: []
