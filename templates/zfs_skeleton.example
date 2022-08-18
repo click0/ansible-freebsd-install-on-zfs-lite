@@ -1,0 +1,18 @@
+
+zfs create $poolname/usr
+zfs create $poolname/var
+zfs create -o compression=on    -o exec=on      -o setuid=off   $poolname/tmp
+zfs create                      -o exec=on      -o setuid=off   $poolname/usr/ports
+zfs create -o compression=off   -o exec=off     -o setuid=off   $poolname/usr/ports/distfiles
+zfs create -o compression=off   -o exec=off     -o setuid=off   $poolname/usr/ports/packages
+zfs create                      -o exec=on      -o setuid=off   $poolname/usr/src
+zfs create                      -o exec=off     -o setuid=off   $poolname/usr/home
+zfs create                      -o exec=off     -o setuid=off   $poolname/var/crash
+zfs create                      -o exec=off     -o setuid=off   $poolname/var/db
+zfs create                      -o exec=on      -o setuid=off   $poolname/var/db/pkg
+zfs create                      -o exec=on      -o setuid=off   $poolname/var/ports
+zfs create                      -o exec=off     -o setuid=off   $poolname/var/empty
+zfs create                      -o exec=off     -o setuid=off   $poolname/var/log
+zfs create -o compression=gzip  -o exec=off     -o setuid=off   $poolname/var/mail
+zfs create                      -o exec=off     -o setuid=off   $poolname/var/run
+zfs create                      -o exec=on      -o setuid=off   $poolname/var/tmp
