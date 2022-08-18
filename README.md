@@ -13,7 +13,7 @@ The role installs the python2 package and uploads the script `go11_4k.sh` to hos
 If you _really need_ to create a ZFS pool with block devices with a block of 512 bytes, then use the [`go11.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/go11.sh).  
 The script does the following:  
 - clears the disks specified in the script arguments.
-- создает ZFS пул и структуру разделов.
+- creates a ZFS pool and partition structure.
 - unpacks FreeBSD archives from the specified FTP/http/https host.
 - makes initial network settings and starts `sshd`.
 - downloads ssh keys (you will have to provide your http/https addresses).
