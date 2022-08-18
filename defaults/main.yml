@@ -6,18 +6,24 @@ fiozl_tmux_tab_name: 'Install_FreeBSD'
 
 fiozl_provider: 'ada0'
 fiozl_swap_partition_size: '512M'
-fiozl_zfs_partition_size: ''  # full disk
+fiozl_zfs_partition_size: ''  # full disk minus {{ fiozl_offset_end_disk }}
 fiozl_poolname: 'zroot'
-fiozl_ashift: ''    # default - 4k, or 8k
-fiozl_hostname: ''
+fiozl_ashift_disk: '' # default - '4k', or '8k'
+fiozl_hostname: '' # default - 'core.domain.com'
 fiozl_ftphost: 'http://otrada.od.ua/FreeBSD/snapshots/12.3/12.3-STABLE r372168 23-06-2022/' # url_dir (12.3)
-fiozl_mode: ''                # Single disk - stripe
+fiozl_mode: '' # Single disk - stripe
 fiozl_distdir: ''
-fiozl_zoneinfo: ''
-fiozl_memdisksize: ''        # default - 350 MB
-fiozl_password: ''
-fiozl_gateway: 'auto'         # or IP or DHCP
-fiozl_ip: ''                  # 10.0.0.101/24
+fiozl_destdir: '' # default - '/mnt'
+fiozl_timezone: '' # default - 'Europe/Kiev'
+fiozl_memdisksize: '' # default - '350' MB # deprecated
+fiozl_offset_end_disk: '' # default - '1' MB
+fiozl_url_ssh_key_file: '' # url of a single ssh key file
+fiozl_url_ssh_key_dir: 'http://support.org.ua/install/test123' #  ${url_ssh_key_dir}/key[1..9].pub
+fiozl_file_zfs_skeleton: '' # look template templates/zfs_skeleton.example
+fiozl_url_file_zfs_skeleton: ''
+fiozl_password: ''  # default mfsroot123
+fiozl_gateway: 'auto' # or IP or DHCP
+fiozl_ip: '' # 10.0.0.101/24
 
 # yaml syntax:
 # https://yaml-multiline.info/
@@ -32,6 +38,11 @@ fiozl_script_options: '
  -M \"{{ fiozl_memdisksize }}\"
  -P \"{{ fiozl_password }}\"
  -h \"{{ fiozl_hostname }}\"
+ -o \"{{ fiozl_offset_end_disk }}\"
+ -k \"{{ fiozl_url_ssh_key_file }}\"
+ -K \"{{ fiozl_url_ssh_key_dir }}\"
+ -D \"{{ fiozl_destdir }}\"
  -g \"{{ fiozl_gateway }}\"
- -a \"{{ fiozl_ashift }}\"
+ -a \"{{ fiozl_ashift_disk }}\"
+ -t \"{{ fiozl_timezone }}\"
 '
