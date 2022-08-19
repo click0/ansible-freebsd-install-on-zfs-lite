@@ -1,6 +1,6 @@
 ---
 
-- name: Запускаем скрипт {{ fiozl_script_name }} в tmux
+- name: Run script {{ fiozl_script_name }} in tmux
   ansible.builtin.command: tmux new-session -d -s {{ fiozl_tmux_tab_name }} "sh {{ fiozl_script_name }} {{ fiozl_script_options }}; csh"
 
 - name: Wait until the file {{ fiozl_script_name }}.{{ fiozl_end_suffix }} is present before continuing
