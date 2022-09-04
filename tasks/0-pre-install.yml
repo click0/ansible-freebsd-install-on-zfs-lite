@@ -1,7 +1,7 @@
 ---
 
 - name: run pkg install python2 via raw module
-  raw: "{{ item }}"
+  raw: '{{ item }}'
   loop:
     - env ASSUME_ALWAYS_YES=yes pkg-static bootstrap -f
     - pkg-static install -yf pkg

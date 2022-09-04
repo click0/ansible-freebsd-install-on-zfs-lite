@@ -1,6 +1,9 @@
 # freebsd-install-on-zfs-lite
 
-[Ansible role.](https://galaxy.ansible.com/click0/freebsd_install_on_zfs_lite/) FreeBSD. Installing a FreeBSD system on the root with ZFS from MfsBSD running in rescue mode.  
+[Ansible Galaxy](https://galaxy.ansible.com/click0/freebsd-install-on-zfs-lite/) 
+
+FreeBSD. Installing a FreeBSD system on the root with ZFS from MfsBSD running in rescue mode.  
+
 Feel free to [share your feedback and report issues](https://github.com/click0/ansible-freebsd-install-on-zfs-lite/issues).  
 [Contributions are welcome](https://github.com/firstcontributions/first-contributions).  
 
@@ -22,17 +25,17 @@ Then the role itself will reboot the remote host on its own.
 
 ## Variables
 
-See the defaults and examples in vars.
+See the `defaults/main.yml` and examples in vars.
 
 ## Workflow
 
 1) Install the role
 
 ```
-shell> ansible-galaxy role install click0.freebsd_install_on_zfs_lite
+shell> ansible-galaxy role install click0.freebsd-install-on-zfs-lite
 ```
 
-2) Look variables, e.g. in defaults/main.yml
+2) Look variables, e.g. in `defaults/main.yml`
 
 You can override them in the playbook and inventory.  
 
@@ -50,7 +53,7 @@ shell> cat install_freebsd_in_mfsbsd.yml
 #  fiozl_hostname: 'vb-12-3.2'  # test name for DHCP  # look Inventory
 
   roles:
-    - freebsd-install-on-zfs-lite
+    - click0.freebsd-install-on-zfs-lite
 
 ```
 
@@ -68,10 +71,17 @@ ansible_python_interpreter=/usr/bin/python2
 # or
 # ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
 ```
+## Dependencies
+
+None.
 
 ## Further use
 
-You may need [another role](https://galaxy.ansible.com/click0/mfsbsd_install_via_linux_lite/) that runs MfsBSD through a Linux host grub.  
+You may need [another role](https://galaxy.ansible.com/click0/mfsbsd-install-via-linux-lite/) that runs MfsBSD through a Linux host grub.  
+
+### License
+
+BSD 3-Clause
 
 ### Author:
 
@@ -79,7 +89,8 @@ You may need [another role](https://galaxy.ansible.com/click0/mfsbsd_install_via
 
 ### 🤝 Contributing
 
-Contributions, issues and feature requests are welcome!<br />Feel free to check [issues page](https://github.com/click0/domain-check-2/issues).
+Contributions, issues and feature requests are welcome!<br>
+Feel free to check [issues page](https://github.com/click0/ansible-freebsd-install-on-zfs-lite/issues).
 
 ### Show your support
 
