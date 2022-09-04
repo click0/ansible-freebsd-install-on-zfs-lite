@@ -2,5 +2,5 @@
 - hosts: localhost
   remote_user: root
   roles:
-    - click0.freebsd-install-on-zfs
+    - click0.freebsd_install_on_zfs
 ...

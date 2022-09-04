@@ -1,6 +1,6 @@
 # freebsd-install-on-zfs-lite
 
-[Ansible Galaxy](https://galaxy.ansible.com/click0/freebsd-install-on-zfs-lite/) 
+[Ansible Galaxy](https://galaxy.ansible.com/click0/freebsd_install_on_zfs_lite/) 
 
 FreeBSD. Installing a FreeBSD system on the root with ZFS from MfsBSD running in rescue mode.  
 
@@ -32,7 +32,7 @@ See the `defaults/main.yml` and examples in vars.
 1) Install the role
 
 ```
-shell> ansible-galaxy role install click0.freebsd-install-on-zfs-lite
+shell> ansible-galaxy role install click0.freebsd_install_on_zfs_lite
 ```
 
 2) Look variables, e.g. in `defaults/main.yml`
@@ -77,7 +77,7 @@ None.
 
 ## Further use
 
-You may need [another role](https://galaxy.ansible.com/click0/mfsbsd-install-via-linux-lite/) that runs MfsBSD through a Linux host grub.  
+You may need [another role](https://galaxy.ansible.com/click0/mfsbsd_install_via_linux_lite/) that runs MfsBSD through a Linux host grub.  
 
 ### License
 
