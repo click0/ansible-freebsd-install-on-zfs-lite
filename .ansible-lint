@@ -1,3 +1,9 @@
+---
+verbosity: 1
+quiet: False
+parseable: True
+use_default_rules: True
+
 skip_list:
   - 'risky-shell-pipe'
   - 'role-name'
