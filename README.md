@@ -9,11 +9,11 @@ Feel free to [share your feedback and report issues](https://github.com/click0/a
 
 ## Synopsis
 
-This role acts as a runner for a single [`go11_4k.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/go11_4k.sh).  
+This role acts as a runner for a single [`gozfs.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/gozfs.sh).  
 (That's why there is `lite` in the role name too)  
 The role expects [MfsBSD](https://mfsbsd.vx.sk) as `standard` to be already running on the remote host (`mini` is an insufficient set of packages, `se` is oversized by the FreeBSD archives).  
-The role installs the python2 package and uploads the script `go11_4k.sh` to host.  
-If you _really need_ to create a ZFS pool with block devices with a block of 512 bytes, then use the [`go11.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/go11.sh).  
+The role installs the python2 package and uploads the script `gozfs.sh` to host.  
+If you _really need_ to create a ZFS pool with block devices with a block of 512 bytes, then use the [`gozfs_512b.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/gozfs_512b.sh).  
 The script does the following:  
 - clears the disks specified in the script arguments.
 - creates a ZFS pool and partition structure.

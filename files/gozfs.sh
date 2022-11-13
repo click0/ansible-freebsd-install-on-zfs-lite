@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Current Version: 1.43
+# Current Version: 1.49
 
 # original script by Philipp Wuensche at http://anonsvn.h3q.com/s/gpt-zfsroot.sh
 # This script is considered beer ware (http://en.wikipedia.org/wiki/Beerware)
@@ -51,6 +51,7 @@ set -x
 ftphost="ftp://ftp.de.freebsd.org/pub/FreeBSD/releases/amd64/amd64/12.3-BETA3/"
 ftp_mirror_list="ftp6.ua ftp1.fr ftp2.de"
 filelist="base lib32 kernel"
+filelist_optional="MANIFEST"			# only fetch
 memdisknumber=10
 #iface_manual=YES
 #manual_gw='defaultrouter="1.1.1.1"'			# gateway IP
@@ -111,7 +112,7 @@ if [ -z "$devcount" ] || [ "$devcount" = ' ' ] || [ "$devcount" = "0" ]; then
 	exit
 fi
 
-#[ -z "$distdir" ] && distdir="/mfs" # deprecated
+#[ -z "$distdir" ] && distdir="/mfs"
 [ -z "$ftphost" ] && ftphost="ftp://ftp.de.freebsd.org/pub/FreeBSD/releases/amd64/amd64/12.3-BETA3/"
 [ -z "$timezone" ] && timezone="Europe/Kiev"
 [ -z "$memdisksize" ] && memdisksize=350M # deprecated
@@ -121,8 +122,10 @@ fi
 [ -z "$offset" ] && offset="2048" # remainder at the end of the disc, 1 MB
 destdir=${destdir:-/mnt}
 
-# autodetect
-iface=${iface:-"$(ifconfig -l -u | sed -e 's/lo[0-9]*//' -e 's/enc[0-9]*//' -e 's/gif[0-9]*//' -e 's/  / /g')"}
+# autodetect physical network interfaces
+iface=${iface:-"$(ifconfig -l -u | sed -e 's/lo[0-9]*//' -e 's/enc[0-9]*//' -e 's/gif[0-9]*//' \
+-e 's/fwe[0-9]*//' -e 's/fwip[0-9]*//' -e 's/ipfw[0-9]*//' -e 's/pflog[0-9]*//' -e 's/plip[0-9]*//' \
+-e 's/stf[0-9]*//' -e 's/lagg[0-9]*//' -e 's/  / /g')"}
 iface=${iface:-"em0 em1 re0 igb0 vtnet0"}
 
 if [ "$gateway" = "auto" ] || [ "${ip_address}" = "auto" ]; then
@@ -145,7 +148,7 @@ sysctl kern.geom.debugflags=16
 
 [ -n "$nameserver" ] && {
 	mkdir -p /tmp/bsdinstall_etc
-	echo 'nameserver $nameserver' >/tmp/bsdinstall_etc/resolv.conf
+	echo "nameserver $nameserver" >/tmp/bsdinstall_etc/resolv.conf
 }
 
 if [ -n "$distdir" ]; then
@@ -300,14 +303,14 @@ fi
 
 echo "Creating GPT ZFS partition on with size ${zfs_partition_size} on disks: "
 counter=0
+if [ "$mode" = "raid10" ]; then
+	labellist=" mirror "
+fi
 for disk in $provider; do
 	get_disk_labelname
 	echo " ->  ${disk} (Label: ${label})"
 	gpart add -t freebsd-zfs ${size_string} -a $ashift -l system-${label} ${disk} >/dev/null
 
-	if [ "$counter" -eq "0" -a "$mode" = "raid10" ]; then
-		labellist="${labellist} mirror "
-	fi
 	counter=$((counter + 1))
 	labellist="${labellist} gpt/system-${label}.nop"
 	if [ "$(expr $counter % 2)" -eq "0" -a "$devcount" -ne "$counter" -a "$mode" = "raid10" ]; then
@@ -336,13 +339,11 @@ fi
 [ ! -d /boot/zfs ] && mkdir /boot/zfs
 
 # create gnop
-counter=0
 [ "$ashift" = "4k" ] && gnop_ashift=4096
 [ "$ashift" = "8k" ] && gnop_ashift=8192
 for disk in $provider; do
 	get_disk_labelname
 	gnop create -S ${gnop_ashift} /dev/gpt/system-${label} >/dev/null
-	counter=$((counter + 1))
 done
 # Show gnop output
 gnop list
@@ -371,11 +372,9 @@ fi
 zpool export $poolname
 
 # destroy gnop
-counter=0
 for disk in $provider; do
 	get_disk_labelname
 	gnop destroy /dev/gpt/system-${label}.nop >/dev/null
-	counter=$((counter + 1))
 done
 ls -l /dev/gpt/
 sleep 3
@@ -461,9 +460,25 @@ cat $destdir/etc/fstab
 
 ### Downloading system archive files
 
-cd ${destdir:-/}
+cd "${destdir:-/}" || exit
 for file in ${filelist}; do
-	fetch -o - "$ftphost/$file.txz" | tar --unlink -xpJf -
+	if [ "x$distdir" = "x" ]; then
+		fetch -o - "$ftphost/$file.txz" | tar --unlink -xpJf -
+	else
+		[ -e "$distdir/$file.txz" ] && (cat $distdir/$file.txz | tar --unlink -xpJf -)
+	fi
+done
+for file in ${filelist_optional}; do
+	if [ "x$distdir" = "x" ]; then
+		fetch -o "$destdir" "$ftphost/$file"
+	fi
+	if [ "$file" = "MANIFEST" ]; then
+		if [ "x$distdir" = "x" ]; then
+		    cp -a "$destdir/$file" /usr/freebsd-dist/
+		else
+			[ -e "$distdir/$file" ] && cp -a "$distdir/$file" /usr/freebsd-dist/
+		fi
+	fi
 done
 
 cp /tmp/zpool.cache $destdir/boot/zfs/zpool.cache
