@@ -12,7 +12,7 @@ fiozl_zfs_partition_size: ''  # full disk minus {{ fiozl_offset_end_disk }}
 fiozl_poolname: 'zroot'
 fiozl_ashift_disk: '' # default - '4k', or '8k'
 fiozl_hostname: '' # default - 'core.domain.com'
-fiozl_ftphost: 'http://otrada.od.ua/FreeBSD/snapshots/12.3/12.3-STABLE r372168 23-06-2022/' # url_dir (12.3)
+fiozl_ftphost: 'http://ftp.freebsd.org/pub/FreeBSD/releases/amd64/12.4-RC2/' # url_dir (12.3)
 fiozl_mode: '' # Single disk - stripe
 fiozl_distdir: ''
 fiozl_destdir: '' # default - '/mnt'
@@ -22,7 +22,7 @@ fiozl_offset_end_disk: '' # default - '1' MB
 fiozl_url_ssh_key_file:
   - '' # url of a single ssh key file
 fiozl_url_ssh_key_dir:
-  - 'http://support.org.ua/install/test123' #  ${url_ssh_key_dir}/key[1..9].pub
+  - '' #  ${url_ssh_key_dir}/key[1..9].pub
 fiozl_file_zfs_skeleton: '' # look template templates/zfs_skeleton.example
 fiozl_url_file_zfs_skeleton: ''
 fiozl_password: ''  # default mfsroot123
