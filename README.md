@@ -44,7 +44,7 @@ You can override them in the playbook and inventory.
 ```
 shell> cat install_freebsd_in_mfsbsd.yml
 
-- hosts: MfsMSD_server
+- hosts: MfsBSD_server
   gather_facts: false
   vars:
 #  fiozl_mfsbsd_version: '12.2' # or 12
@@ -61,9 +61,9 @@ Commented options you may need.
 
 ```
 shell> cat hosts
-[MfsMSD_server]
-<MfsMSD_server-ip-or-fqdn>
-[MfsMSD_server:vars]
+[MfsBSD_server]
+<MfsBSD_server-ip-or-fqdn>
+[MfsBSD_server:vars]
 executable = /usr/local/bin/bash
 ansible_shell_type = csh
 ansible_python_interpreter=/usr/bin/python2
