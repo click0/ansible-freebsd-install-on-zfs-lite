@@ -9,4 +9,4 @@
     state: present
     delay: 10
     timeout: 3600
-    msg: Timeout to find file {{ script_name }}.{{ end_suffix }}
+    msg: Timeout to find file {{ fiozl_script_name }}.{{ fiozl_end_suffix }}
