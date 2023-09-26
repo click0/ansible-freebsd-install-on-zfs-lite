@@ -5,7 +5,8 @@
   loop:
     - env ASSUME_ALWAYS_YES=yes pkg-static bootstrap -f
     - pkg-static install -yf pkg
-    - pkg install -y python2
+    - env IGNORE_OSVERSION=yes pkg update -f
+    - pkg install -y python2 bash-static
   ignore_errors: true
 
 - name: Add tmux option
