@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Current Version: 1.51
+# Current Version: 1.53
 
 # original script by Philipp Wuensche at http://anonsvn.h3q.com/s/gpt-zfsroot.sh
 # This script is considered beer ware (http://en.wikipedia.org/wiki/Beerware)
@@ -466,14 +466,14 @@ cat $destdir/etc/fstab
 cd "${destdir:-/}" || exit
 for file in ${filelist}; do
 	if [ "x$distdir" = "x" ]; then
-		fetch -o - "$ftphost/$file.txz" | tar --unlink -xpJf -
+		(fetch --retry -o - "$ftphost/$file.txz" | tar --unlink -xpJf -) || exit
 	else
 		[ -e "$distdir/$file.txz" ] && (cat $distdir/$file.txz | tar --unlink -xpJf -)
 	fi
 done
 for file in ${filelist_optional}; do
 	if [ "x$distdir" = "x" ]; then
-		fetch -o "$destdir" "$ftphost/$file"
+		fetch --retry -o "$destdir" "$ftphost/$file"
 	fi
 	if [ "$file" = "MANIFEST" ]; then
 		if [ "x$distdir" = "x" ]; then
@@ -559,9 +559,7 @@ fi
 if [ -n "${ssh_key_file}" ]; then
 	for ssh_key in ${ssh_key_file}; do
 		if (ping -q -c3 $(echo ${ssh_key} | awk -F/ '{print $3;}') >/dev/null 2>&1); then
-			for i in $(seq 1 9); do
-				fetch -qo - ${ssh_key} >>${root_dir}/authorized_keys
-			done
+			fetch -qo - ${ssh_key} >>${root_dir}/authorized_keys
 			chmod 600 ${root_dir}/authorized_keys
 			break
 		else
@@ -618,7 +616,9 @@ echo You\'ve just been chrooted into your fresh installation.
 echo passwd root
 
 cd /
-chroot $destdir /bin/sh -c "hostname $hostname; make -C /etc/mail aliases; cp /usr/share/timezone/$timezone /etc/localtime;"
+[ -d /usr/share/zoneinfo ] && file_timezone=/usr/share/zoneinfo/$timezone;
+chroot $destdir /bin/sh -c "hostname $hostname; make -C /etc/mail aliases;
+[ -e "${file_timezone}" ] && ln -s ${file_timezone} /etc/localtime;"
 echo "$password" | pw -V $destdir/etc usermod root -h 0
 chroot $destdir /bin/sh -c "cd /; umount /dev"
 
