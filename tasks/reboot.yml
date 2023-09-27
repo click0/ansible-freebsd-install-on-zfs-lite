@@ -2,4 +2,4 @@
 
 - name: Reboot the server
   reboot:
-    reboot_timeout: 3600
+    reboot_timeout: '{{ fiozl_reboot_timeout }}'
