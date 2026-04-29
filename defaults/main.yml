@@ -10,13 +10,13 @@ fiozl_provider:
 fiozl_swap_partition_size: '512M'
 fiozl_zfs_partition_size: ''  # full disk minus {{ fiozl_offset_end_disk }}
 fiozl_poolname: 'zroot'
-fiozl_ashift_disk: '' # default - '4k', or '8k'
+fiozl_ashift_disk: '' # default - '4k', or '512b', '8k'
 fiozl_hostname: '' # default - 'core.domain.com'
-fiozl_ftphost: 'http://ftp.freebsd.org/pub/FreeBSD/releases/amd64/12.4-RC2/' # url_dir (12.3)
+fiozl_ftphost: 'http://ftp.freebsd.org/pub/FreeBSD/releases/amd64/15.0-RELEASE/'
 fiozl_mode: '' # Single disk - stripe
 fiozl_distdir: ''
 fiozl_destdir: '' # default - '/mnt'
-fiozl_timezone: '' # default - 'Europe/Kiev'
+fiozl_timezone: '' # default - 'Europe/Kyiv'
 fiozl_memdisksize: '' # default - '350' MB # deprecated
 fiozl_offset_end_disk: '' # default - '1' MB
 fiozl_url_ssh_key_file:
@@ -29,6 +29,12 @@ fiozl_password: ''  # default mfsroot123
 fiozl_gateway: 'auto' # or IP or DHCP
 fiozl_ip: '' # 10.0.0.101/24
 fiozl_reboot_timeout: '300' # seconds
+
+# New options (gozfs.sh >= 1.60)
+fiozl_boot_mode: '' # default - 'auto'; 'bios', 'uefi', 'hybrid'
+fiozl_encryption_mode: '' # default - 'none'; 'native'
+fiozl_encrypt_passphrase_file: '' # path to file with ZFS encryption passphrase
+fiozl_install_debug: false # true => add -x (install base-dbg, lib32-dbg, kernel-dbg)
 
 # yaml syntax:
 # https://yaml-multiline.info/
@@ -50,4 +56,8 @@ fiozl_script_options: '
  -g ''{{ fiozl_gateway }}''
  -a ''{{ fiozl_ashift_disk }}''
  -t ''{{ fiozl_timezone }}''
+ -B ''{{ fiozl_boot_mode }}''
+ -E ''{{ fiozl_encryption_mode }}''
+ -e ''{{ fiozl_encrypt_passphrase_file }}''
+ {% if fiozl_install_debug %} -x{% endif %}
 '
