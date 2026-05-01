@@ -1,18 +1,28 @@
+# Custom dataset skeleton, sourced from gozfs.sh after $poolname/ROOT/default
+# is created and bootfs is set. Override only if you do NOT want the default
+# Boot-Environment-aware layout produced by gozfs.sh >= 1.60.
+#
+# Available shell variables: $poolname, $destdir
+#
+# NOTE: gozfs.sh creates the BE container automatically:
+#   $poolname              (canmount=off, mountpoint=none)
+#   $poolname/ROOT         (canmount=off)
+#   $poolname/ROOT/default (mountpoint=/, bootfs)
+# This skeleton runs AFTER those are in place, so create only application data
+# datasets here (preferably under $poolname/ROOT/default/* for BE-tracked data
+# or $poolname/<name> for BE-independent data such as /home, /var/log).
 
-zfs create $poolname/usr
-zfs create $poolname/var
-zfs create -o compression=on    -o exec=on      -o setuid=off   $poolname/tmp
+# Shared (BE-independent) containers
+zfs create -o canmount=off      -o mountpoint=/usr              $poolname/usr
+zfs create -o canmount=off      -o mountpoint=/var              $poolname/var
+zfs create                      -o mountpoint=/tmp              -o exec=on      -o setuid=off   $poolname/tmp
 zfs create                      -o exec=on      -o setuid=off   $poolname/usr/ports
 zfs create -o compression=off   -o exec=off     -o setuid=off   $poolname/usr/ports/distfiles
 zfs create -o compression=off   -o exec=off     -o setuid=off   $poolname/usr/ports/packages
 zfs create                      -o exec=on      -o setuid=off   $poolname/usr/src
-zfs create                      -o exec=off     -o setuid=off   $poolname/usr/home
+zfs create                      -o exec=on      -o setuid=off   $poolname/usr/home
+zfs create                      -o exec=off     -o setuid=off   $poolname/var/audit
 zfs create                      -o exec=off     -o setuid=off   $poolname/var/crash
-zfs create                      -o exec=off     -o setuid=off   $poolname/var/db
-zfs create                      -o exec=on      -o setuid=off   $poolname/var/db/pkg
-zfs create                      -o exec=on      -o setuid=off   $poolname/var/ports
-zfs create                      -o exec=off     -o setuid=off   $poolname/var/empty
 zfs create                      -o exec=off     -o setuid=off   $poolname/var/log
 zfs create -o compression=gzip  -o exec=off     -o setuid=off   $poolname/var/mail
-zfs create                      -o exec=off     -o setuid=off   $poolname/var/run
 zfs create                      -o exec=on      -o setuid=off   $poolname/var/tmp
