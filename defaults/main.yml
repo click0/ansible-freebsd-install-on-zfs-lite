@@ -10,7 +10,7 @@ fiozl_provider:
 fiozl_swap_partition_size: '512M'
 fiozl_zfs_partition_size: ''  # full disk minus {{ fiozl_offset_end_disk }}
 fiozl_poolname: 'zroot'
-fiozl_ashift_disk: '' # default - '4k', or '512b', '8k'
+fiozl_ashift_disk: '' # default - '4k'; one of '512b', '4k', '8k'
 fiozl_hostname: '' # default - 'core.domain.com'
 fiozl_ftphost: 'http://ftp.freebsd.org/pub/FreeBSD/releases/amd64/15.0-RELEASE/'
 fiozl_mode: '' # Single disk - stripe
@@ -31,10 +31,35 @@ fiozl_ip: '' # 10.0.0.101/24
 fiozl_reboot_timeout: '300' # seconds
 
 # New options (gozfs.sh >= 1.60)
-fiozl_boot_mode: '' # default - 'auto'; 'bios', 'uefi', 'hybrid'
-fiozl_encryption_mode: '' # default - 'none'; 'native'
-fiozl_encrypt_passphrase_file: '' # path to file with ZFS encryption passphrase
-fiozl_install_debug: false # true => add -x (install base-dbg, lib32-dbg, kernel-dbg)
+
+# Boot loader scheme:
+#   ''       - auto-detect (default in script)
+#   'bios'   - legacy BIOS only (freebsd-boot + gptzfsboot)
+#   'uefi'   - UEFI only (EFI System Partition + loader.efi)
+#   'hybrid' - both BIOS and UEFI partitions (dual-boot capable media)
+fiozl_boot_mode: ''
+
+# ZFS native encryption (OpenZFS 2.0+):
+#   'none'   - no extra encrypted dataset (default in script)
+#   'native' - create extra dataset <poolname>/encrypted (aes-256-gcm,
+#              keyformat=passphrase). Unlocked at boot via zfskeys rc service.
+fiozl_encryption_mode: ''
+
+# Path on the MfsBSD host with the passphrase (single line, no trailing newline
+# is enforced by the script). Used only when fiozl_encryption_mode == 'native'.
+# If you also set fiozl_encrypt_passphrase below, the role will write that
+# value into this path automatically (default /root/.zfs_passphrase).
+fiozl_encrypt_passphrase_file: ''
+
+# Literal passphrase. If non-empty AND fiozl_encryption_mode == 'native',
+# the role uploads it (mode 0600) to {{ fiozl_encrypt_passphrase_file
+# | default('/root/.zfs_passphrase', true) }} on the MfsBSD host and passes
+# it to the script via -e. Mark this value with `no_log: true` in your
+# inventory or pass it through ansible-vault.
+fiozl_encrypt_passphrase: ''
+
+# Install debug distribution sets (base-dbg, lib32-dbg, kernel-dbg).
+fiozl_install_debug: false
 
 # yaml syntax:
 # https://yaml-multiline.info/
@@ -58,6 +83,6 @@ fiozl_script_options: '
  -t ''{{ fiozl_timezone }}''
  -B ''{{ fiozl_boot_mode }}''
  -E ''{{ fiozl_encryption_mode }}''
- -e ''{{ fiozl_encrypt_passphrase_file }}''
+ -e ''{{ _fiozl_effective_passphrase_file | default(fiozl_encrypt_passphrase_file) }}''
  {% if fiozl_install_debug %} -x{% endif %}
 '
