@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Current Version: 1.55
+# Current Version: 1.60
 
 # original script by Philipp Wuensche at http://anonsvn.h3q.com/s/gpt-zfsroot.sh
 # This script is considered beer ware (http://en.wikipedia.org/wiki/Beerware)
@@ -46,11 +46,12 @@
 # regards.
 # olaf.
 
-set -x
+[ "${DEBUG:-}" = "1" ] && set -x
 
 ftphost="ftp://ftp.de.freebsd.org/pub/FreeBSD/releases/amd64/amd64/12.3-BETA3/"
 ftp_mirror_list="ftp6.ua ftp1.fr ftp2.de"
 filelist="base lib32 kernel"
+filelist_debug="base-dbg lib32-dbg kernel-dbg"
 filelist_optional="MANIFEST"			# only fetch
 memdisknumber=10
 #iface_manual=YES
@@ -62,17 +63,27 @@ memdisknumber=10
 
 usage="Usage: $0 -p <geom_provider> -s <swap_partition_size> -S <zfs_partition_size> -n <zpoolname> -f <ftphost>
 [ -m <zpool-raidmode> -d <distribution_dir> -D <destination_dir> -M <size_memory_disk> -o <offset_end_disk> -a <ashift_disk>
--P <new_password> -t <timezone> -k <url_ssh_key_file> -K <url_ssh_key_dir>
--z <file_zfs_skeleton> -Z <url_file_zfs_skeleton> ]
-[ -g <gateway> [-i <iface>] -I <IP_address/mask> ]"
+-B <boot_mode> -E <encryption_mode> -P <new_password> -t <timezone> -k <url_ssh_key_file> -K <url_ssh_key_dir>
+-z <file_zfs_skeleton> -Z <url_file_zfs_skeleton> -x ]
+[ -g <gateway> [-i <iface>] -I <IP_address/mask> ]
+
+boot_mode: auto (default), bios, uefi, hybrid
+ashift_disk: 512b, 4k (default), 8k
+encryption_mode: none (default), native
+  When 'native': creates an extra encrypted dataset <poolname>/encrypted
+  with aes-256-gcm. Passphrase source (in priority order):
+    -e <file>  --  read passphrase from file (recommended; avoids shell quoting)
+    \$ZFS_ENCRYPT_PASSPHRASE env var
+    interactive prompt
+  Unlocked at boot via the zfskeys rc service.
+-x: also install debug distribution sets (base-dbg, lib32-dbg, kernel-dbg)"
 
 exerr() {
-	# shellcheck disable=SC2039
-	echo -e "$*" >&2
+	printf '%b\n' "$*" >&2
 	exit 1
 }
 
-while getopts p:P:s:S:n:h:f:m:M:o:d:D:t:g:i:I:a:z:Z:k:K: arg; do
+while getopts p:P:s:S:n:h:f:m:M:o:d:D:t:g:i:I:a:B:E:e:z:Z:k:K:x arg; do
 	case ${arg} in
 	p) provider="$provider ${OPTARG}" ;;
 	P) password=${OPTARG} ;;
@@ -91,10 +102,14 @@ while getopts p:P:s:S:n:h:f:m:M:o:d:D:t:g:i:I:a:z:Z:k:K: arg; do
 	i) iface=${OPTARG} ;;
 	I) ip_address=${OPTARG} ;;
 	a) ashift=${OPTARG} ;;
+	B) boot_mode=${OPTARG} ;;
+	E) encryption_mode=${OPTARG} ;;
+	e) encrypt_passphrase_file=${OPTARG} ;;
 	z) file_zfs_skeleton=${OPTARG} ;;
 	Z) url_file_zfs_skeleton=${OPTARG} ;;
 	k) ssh_key_file="${ssh_key_file} ${OPTARG}" ;;
 	K) ssh_key_dir="${ssh_key_dir} ${OPTARG}" ;;
+	x) install_debug=1 ;;
 	?) exerr "${usage}" ;;
 	esac
 done
@@ -102,26 +117,112 @@ shift "$((OPTIND-1))"
 
 if [ -z "$poolname" ] || [ -z "$provider" ]; then
 	exerr "${usage}"
-	exit
 fi
 
 # count the number of providers
 devcount=$(echo "${provider}" | xargs -n1 | sort -u | xargs | wc -w | tr -d ' ')
 if [ -z "$devcount" ] || [ "$devcount" = ' ' ] || [ "$devcount" = "0" ]; then
 	exerr "${usage}"
-	exit
 fi
 
 #[ -z "$distdir" ] && distdir="/mfs"
 [ -z "$ftphost" ] && ftphost="ftp://ftp.de.freebsd.org/pub/FreeBSD/releases/amd64/amd64/12.3-BETA3/"
-[ -z "$timezone" ] && timezone="Europe/Kiev"
+[ -z "$timezone" ] && timezone="Europe/Kyiv"
 [ -z "$memdisksize" ] && memdisksize=350M # deprecated
 [ -z "$password" ] && password="mfsroot123"
 [ -z "$hostname" ] && hostname="core.domain.com"
-[ -z "$ashift" ] && ashift="4k"		# 4k or 8k
+[ -z "$ashift" ] && ashift="4k"		# 512b, 4k or 8k
+
+case "$ashift" in
+	512b)
+		# Native 512-byte sectors: no gnop wrapper, no gpart alignment override.
+		gpart_align_arg=""
+		gnop_size=""
+		min_auto_ashift_val=12
+		nop_suffix=""
+		;;
+	4k)
+		gpart_align_arg="-a 4k"
+		gnop_size=4096
+		min_auto_ashift_val=13
+		nop_suffix=".nop"
+		;;
+	8k)
+		gpart_align_arg="-a 8k"
+		gnop_size=8192
+		min_auto_ashift_val=13
+		nop_suffix=".nop"
+		;;
+	*) exerr "Invalid ashift: $ashift. Use 512b, 4k, or 8k." ;;
+esac
+
+# Encryption mode (default: off)
+[ -z "$encryption_mode" ] && encryption_mode="none"
+case "$encryption_mode" in
+	none|native) ;;
+	*) exerr "Invalid encryption mode: $encryption_mode. Use none or native." ;;
+esac
+
+encrypt_keyfile=""
+if [ "$encryption_mode" = "native" ]; then
+	encrypt_keyfile=$(mktemp /tmp/zfs_passphrase.XXXXXX) || exerr "Cannot create passphrase tempfile"
+	chmod 600 "$encrypt_keyfile"
+	if [ -n "$encrypt_passphrase_file" ]; then
+		# Most shell-portable path (csh-friendly, no quoting hazards).
+		[ -r "$encrypt_passphrase_file" ] || {
+			rm -f "$encrypt_keyfile"
+			exerr "Passphrase file not readable: $encrypt_passphrase_file"
+		}
+		# Strip any trailing newline so 'echo passphrase > file' just works.
+		awk 'NR==1{printf "%s", $0; exit}' "$encrypt_passphrase_file" > "$encrypt_keyfile"
+	elif [ -n "$ZFS_ENCRYPT_PASSPHRASE" ]; then
+		printf '%s' "$ZFS_ENCRYPT_PASSPHRASE" > "$encrypt_keyfile"
+	else
+		printf 'Enter ZFS encryption passphrase (>=8 chars): ' >&2
+		stty -echo 2>/dev/null
+		IFS= read -r encrypt_passphrase
+		stty echo 2>/dev/null
+		echo >&2
+		if [ "${#encrypt_passphrase}" -lt 8 ]; then
+			rm -f "$encrypt_keyfile"
+			exerr "Passphrase too short (need >=8 chars)"
+		fi
+		printf '%s' "$encrypt_passphrase" > "$encrypt_keyfile"
+		unset encrypt_passphrase
+	fi
+fi
+
 [ -z "$offset" ] && offset="2048"	# remainder at the end of the disc, 1 MB
 									# 1 MB approximately for every full and partial 1 TB of disk capacity.
 destdir=${destdir:-/mnt}
+esp_size="800m"						# EFI System Partition size
+
+# optionally add debug distribution sets
+if [ "${install_debug}" = "1" ]; then
+	filelist="${filelist} ${filelist_debug}"
+fi
+
+# auto-detect or validate boot mode
+detect_boot_mode() {
+	if sysctl -n machdep.bootmethod 2>/dev/null | grep -qi uefi; then
+		echo "uefi"
+	elif [ -d /sys/firmware/efi ]; then
+		echo "uefi"
+	else
+		echo "bios"
+	fi
+}
+
+if [ -z "$boot_mode" ] || [ "$boot_mode" = "auto" ]; then
+	boot_mode=$(detect_boot_mode)
+	echo "Auto-detected boot mode: $boot_mode"
+fi
+
+case "$boot_mode" in
+	bios|uefi|hybrid) ;;
+	*) exerr "Invalid boot mode: $boot_mode. Use bios, uefi, or hybrid." ;;
+esac
+echo "Boot mode: $boot_mode"
 
 # autodetect physical network interfaces
 iface=${iface:-"$(ifconfig -l -u | sed -e 's/lo[0-9]*//' -e 's/enc[0-9]*//' -e 's/gif[0-9]*//' \
@@ -177,13 +278,12 @@ fi
 
 # set our default zpool mirror-mode
 if [ -z "$mode" ]; then
-	if [ "$devcount" -gt "1" ]; then
-		mode='mirror'
-	fi
-	if [ "$devcount" -eq "4" ]; then
+	if [ "$devcount" -eq "1" ]; then
+		mode='stripe'
+	elif [ "$devcount" -eq "4" ]; then
 		mode='raid10'
 	else
-		mode='stripe'
+		mode='mirror'
 	fi
 fi
 echo $mode
@@ -191,21 +291,21 @@ echo $mode
 sleep 1
 
 # check the settings for the users that want to set the mode on their own
-if [ "$devcount" -eq "1" -a "$mode" = "mirror" ]; then
+if [ "$devcount" -eq "1" ] && [ "$mode" = "mirror" ]; then
 	echo "A mirror needs at least two disks!"
-	exit
+	exit 1
 fi
-if [ "$devcount" -lt "3" -a "$mode" = "raidz" ]; then
+if [ "$devcount" -lt "3" ] && [ "$mode" = "raidz" ]; then
 	echo "Sorry, you need at least three disks for a zfs raidz!"
-	exit
+	exit 1
 fi
-if [ "$devcount" -lt "4" -a "$mode" = "raid10" ]; then
+if [ "$devcount" -lt "4" ] && [ "$mode" = "raid10" ]; then
 	echo "Sorry, you need at least four disks for a raid10 equivalent szenario!"
-	exit
+	exit 1
 fi
-if [ "$((devcount % 2))" -ne "0" -a "$mode" = "raid10" ]; then
+if [ "$((devcount % 2))" -ne "0" ] && [ "$mode" = "raid10" ]; then
 	echo "Sorry, you need an even number of disks for a raid10 equivalent szenario!"
-	exit
+	exit 1
 fi
 
 check_size() {
@@ -248,8 +348,8 @@ for disk in $provider; do
 	# against PR 196102
 	# todo need to do tests
 	gpart recover /dev/$disk
-	if (gpart show /dev/$disk | egrep -v '=>| - free -|^$'); then
-		disk_index_list="$(gpart show /dev/$disk | egrep -v '=>| - free -|^$' | awk '{print $3;}' | sort -r)"
+	if (gpart show /dev/$disk | grep -E -v '=>| - free -|^$'); then
+		disk_index_list="$(gpart show /dev/$disk | grep -E -v '=>| - free -|^$' | awk '{print $3;}' | sort -r)"
 		for disk_index in ${disk_index_list}; do
 			gpart delete -i ${disk_index} /dev/$disk || exit 1
 		done
@@ -279,29 +379,46 @@ echo
 echo "NOTICE: Using ${ref_disk} (smallest or only disk) as reference disk for calculation offsets"
 echo
 
-echo "Creating GPT boot partition on disks:"
-counter=0
-for disk in $provider; do
-	get_disk_labelname
-	echo " ->  ${disk}"
-	gpart add -s 1024 -t freebsd-boot -a $ashift -l boot-${counter} $disk >/dev/null
-	counter=$((counter + 1))
-done
+# Create BIOS boot partition
+if [ "$boot_mode" = "bios" ] || [ "$boot_mode" = "hybrid" ]; then
+	echo "Creating GPT BIOS boot partition on disks:"
+	counter=0
+	for disk in $provider; do
+		get_disk_labelname
+		echo " ->  ${disk}"
+		gpart add -s 1024 -t freebsd-boot ${gpart_align_arg} -l boot-${counter} $disk >/dev/null
+		counter=$((counter + 1))
+	done
+fi
 
-if [ "${swap_partition_size}" ]; then
-	echo "Creating GPT swap partition on with size ${swap_partition_size} on disks: "
+# Create EFI System Partition
+if [ "$boot_mode" = "uefi" ] || [ "$boot_mode" = "hybrid" ]; then
+	echo "Creating EFI System Partition (${esp_size}) on disks:"
+	counter=0
+	for disk in $provider; do
+		get_disk_labelname
+		echo " ->  ${disk}"
+		gpart add -s ${esp_size} -t efi ${gpart_align_arg} -l efi-${label} $disk >/dev/null
+		counter=$((counter + 1))
+	done
+fi
+
+if [ "${swap_partition_size}" ] && [ "${swap_partition_size}" != "0" ]; then
+	echo "Creating GPT swap partition with size ${swap_partition_size} on disks: "
 	for disk in $provider; do
 		get_disk_labelname
 		echo " ->  ${disk} (Label: ${label})"
-		gpart add -b 2048 -s "${swap_partition_size}" -t freebsd-swap -a $ashift -l swap-"${label}" ${disk} >/dev/null
+		gpart add -s "${swap_partition_size}" -t freebsd-swap ${gpart_align_arg} -l swap-"${label}" ${disk} >/dev/null
 		swapon /dev/gpt/swap-${label}
 	done
 fi
 
 ###offset=$(gpart show ${ref_disk} | grep '\- free \-' | tail -n 1 | awk '{print $1}')
 last_partition_disk_size=$(gpart show ${ref_disk} | grep '\- free \-' | tail -n 1 | awk '{print $2}')
-if [ "${zfs_partition_size}" -a "${last_partition_disk_size}" -le "${smallest_disk_size}" ]; then
-	size_string="-s $((zfs_partition_size - offset))"
+sector_size=$(gpart list ${ref_disk} | awk '/Sectorsize:/{print $2; exit}')
+[ -z "${sector_size}" ] && sector_size=512
+if [ "${zfs_partition_size}" ] && [ "${last_partition_disk_size}" -le "${smallest_disk_size}" ]; then
+	size_string="-s $((_zfs_partition_size / sector_size - offset))"
 else
 	size_string="-s $((last_partition_disk_size - offset))"
 fi
@@ -314,11 +431,11 @@ fi
 for disk in $provider; do
 	get_disk_labelname
 	echo " ->  ${disk} (Label: ${label})"
-	gpart add -t freebsd-zfs ${size_string} -a $ashift -l system-${label} ${disk} >/dev/null
+	gpart add -t freebsd-zfs ${size_string} ${gpart_align_arg} -l system-${label} ${disk} >/dev/null
 
 	counter=$((counter + 1))
-	labellist="${labellist} gpt/system-${label}.nop"
-	if [ "$(expr $counter % 2)" -eq "0" -a "$devcount" -ne "$counter" -a "$mode" = "raid10" ]; then
+	labellist="${labellist} gpt/system-${label}${nop_suffix}"
+	if [ "$((counter % 2))" -eq "0" ] && [ "$devcount" -ne "$counter" ] && [ "$mode" = "raid10" ]; then
 		labellist="${labellist} mirror "
 	fi
 done
@@ -327,31 +444,28 @@ done
 ls -l /dev/gpt/
 
 # Make first partition active so the BIOS boots from it
-for disk in $provider; do
-	get_disk_labelname
-	# see https://forums.freebsd.org/threads/freebsd-gpt-uefi.42781/#post-238472
-done
+# see https://forums.freebsd.org/threads/freebsd-gpt-uefi.42781/#post-238472
 
-if ! $(/sbin/kldstat -m zfs >/dev/null 2>/dev/null); then
-	/sbin/kldload zfs >/dev/null 2>/dev/null
-	sysctl vfs.zfs.min_auto_ashift=13 # need module zfs
+if ! /sbin/kldstat -m zfs >/dev/null 2>&1; then
+	/sbin/kldload zfs >/dev/null 2>&1
+	sysctl vfs.zfs.min_auto_ashift=${min_auto_ashift_val} # need module zfs
 fi
-if ! $(/sbin/kldstat -m g_nop >/dev/null 2>/dev/null); then
-	/sbin/kldload geom_nop.ko >/dev/null 2>/dev/null
+if [ -n "${gnop_size}" ] && ! /sbin/kldstat -m g_nop >/dev/null 2>&1; then
+	/sbin/kldload geom_nop.ko >/dev/null 2>&1
 fi
 
 # we need to create /boot/zfs so zpool.cache can be written.
 [ ! -d /boot/zfs ] && mkdir /boot/zfs
 
-# create gnop
-[ "$ashift" = "4k" ] && gnop_ashift=4096
-[ "$ashift" = "8k" ] && gnop_ashift=8192
-for disk in $provider; do
-	get_disk_labelname
-	gnop create -S ${gnop_ashift} /dev/gpt/system-${label} >/dev/null
-done
-# Show gnop output
-gnop list
+# create gnop wrapper to force ashift on disks that report 512-byte sectors
+if [ -n "${gnop_size}" ]; then
+	for disk in $provider; do
+		get_disk_labelname
+		gnop create -S ${gnop_size} /dev/gpt/system-${label} >/dev/null
+	done
+	# Show gnop output
+	gnop list
+fi
 
 zpool_option="-o altroot=$destdir -o cachefile=/tmp/zpool.cache"
 # Create the pool and the rootfs
@@ -371,37 +485,41 @@ fi
 
 if [ "$(zpool list -H -o name $poolname)" != "$poolname" ]; then
 	echo "ERROR: Could not create zpool $poolname"
-	exit
+	exit 1
 fi
 
 zpool export $poolname
 
 # destroy gnop
-for disk in $provider; do
-	get_disk_labelname
-	gnop destroy /dev/gpt/system-${label}.nop >/dev/null
-done
+if [ -n "${gnop_size}" ]; then
+	for disk in $provider; do
+		get_disk_labelname
+		gnop destroy /dev/gpt/system-${label}.nop >/dev/null
+	done
+fi
 ls -l /dev/gpt/
 sleep 3
 zpool import ${zpool_option} $poolname
 zpool status
 gpart show
 
-echo "Setting checksum to fletcher4"
-zfs set checksum=fletcher4 $poolname
-zfs set reservation=50M $poolname
+# pool-wide properties
 zfs set compression=lz4 $poolname
-
-zfs create -p $poolname
+zfs set atime=off $poolname
+zfs set acltype=nfsv4 $poolname
+zfs set xattr=sa $poolname
+zfs set reservation=50M $poolname
+zfs set mountpoint=none $poolname
+zfs set canmount=off $poolname
 zfs set freebsd:boot-environment=1 $poolname
-#zpool set bootfs=$poolname $poolname
 
-# Now we create some stuff we also would like to have in separate filesystems
-
-zfs set mountpoint=$destdir $poolname || exit 1
+# Boot Environment container and default BE
+zfs create -o canmount=off -o mountpoint=none $poolname/ROOT
+zfs create -o mountpoint=/ $poolname/ROOT/default
+zpool set bootfs=$poolname/ROOT/default $poolname
 
 if [ -n "${url_file_zfs_skeleton}" ]; then
-	fetch "${url_file_zfs_skeleton}" | sh
+	fetch -o /tmp/zfs_skeleton.sh "${url_file_zfs_skeleton}" && sh /tmp/zfs_skeleton.sh
 else
 	if [ -n "${file_zfs_skeleton}" ]; then
 		if [ -f "${file_zfs_skeleton}" ]; then
@@ -413,28 +531,42 @@ fi
 
 if [ -z "${url_file_zfs_skeleton}" ] && [ -z "${file_zfs_skeleton}" ]; then
 
-zfs create $poolname/usr
-zfs create $poolname/var
-zfs create -o compression=on    -o exec=on      -o setuid=off   $poolname/tmp
+# /usr and /var are shared-container datasets (canmount=off)
+zfs create -o canmount=off      -o mountpoint=/usr              $poolname/usr
+zfs create -o canmount=off      -o mountpoint=/var              $poolname/var
+zfs create                      -o mountpoint=/tmp              -o exec=on      -o setuid=off   $poolname/tmp
 zfs create                      -o exec=on      -o setuid=off   $poolname/usr/ports
 zfs create -o compression=off   -o exec=off     -o setuid=off   $poolname/usr/ports/distfiles
 zfs create -o compression=off   -o exec=off     -o setuid=off   $poolname/usr/ports/packages
 zfs create                      -o exec=on      -o setuid=off   $poolname/usr/src
-zfs create                      -o exec=off     -o setuid=off   $poolname/usr/home
+zfs create                      -o exec=on      -o setuid=off   $poolname/usr/home
+zfs create                      -o exec=off     -o setuid=off   $poolname/var/audit
 zfs create                      -o exec=off     -o setuid=off   $poolname/var/crash
-zfs create                      -o exec=off     -o setuid=off   $poolname/var/db
-zfs create                      -o exec=on      -o setuid=off   $poolname/var/db/pkg
-zfs create                      -o exec=on      -o setuid=off   $poolname/var/ports
-zfs create                      -o exec=off     -o setuid=off   $poolname/var/empty
 zfs create                      -o exec=off     -o setuid=off   $poolname/var/log
 zfs create -o compression=gzip  -o exec=off     -o setuid=off   $poolname/var/mail
-zfs create                      -o exec=off     -o setuid=off   $poolname/var/run
 zfs create                      -o exec=on      -o setuid=off   $poolname/var/tmp
 
 fi
 
+# Optional: create encrypted dataset (ZFS native encryption, OpenZFS 2.0+)
+if [ "$encryption_mode" = "native" ]; then
+	echo "Creating encrypted dataset $poolname/encrypted (aes-256-gcm)"
+	zfs create \
+		-o encryption=aes-256-gcm \
+		-o keyformat=passphrase \
+		-o keylocation=file://"$encrypt_keyfile" \
+		-o mountpoint=/encrypted \
+		"$poolname/encrypted" || {
+			rm -f "$encrypt_keyfile"
+			exerr "Failed to create encrypted dataset (does the pool support feature@encryption?)"
+		}
+	# switch to prompt-on-boot so no plaintext key remains on disk
+	zfs set keylocation=prompt "$poolname/encrypted"
+	rm -f "$encrypt_keyfile"
+fi
+
 zpool export $poolname
-zpool import -f -d /dev/gpt/ -o cachefile=/tmp/zpool.cache $poolname
+zpool import -f -d /dev/gpt/ -o altroot=$destdir -o cachefile=/tmp/zpool.cache $poolname
 
 zfs list
 
@@ -450,12 +582,12 @@ cat <<EOF >$destdir/etc/fstab
 
 # Device		Mountpoint	FStype		Options	Dump	Pass#
 EOF
-if [ "$swap_partition_size" ]; then
+if [ "$swap_partition_size" ] && [ "$swap_partition_size" != "0" ]; then
 	echo "Adding swap partitions in fstab:"
 	for disk in $provider; do
 		get_disk_labelname
 		echo " ->  /dev/gpt/swap-${label}"
-		echo -e "/dev/gpt/swap-${label}	none		swap	sw	0	0" >>$destdir/etc/fstab
+		printf '/dev/gpt/swap-%s\tnone\t\tswap\tsw\t0\t0\n' "${label}" >>"$destdir/etc/fstab"
 		#		swapon /dev/gpt/swap-${label}
 	done
 else
@@ -471,7 +603,7 @@ for file in ${filelist}; do
 	if [ "x$distdir" = "x" ]; then
 		(fetch --retry -o - "$ftphost/$file.txz" | tar --unlink -xpJf -) || exit
 	else
-		[ -e "$distdir/$file.txz" ] && (cat $distdir/$file.txz | tar --unlink -xpJf -)
+		[ -e "$distdir/$file.txz" ] && tar --unlink -xpJf "$distdir/$file.txz"
 	fi
 done
 for file in ${filelist_optional}; do
@@ -479,6 +611,7 @@ for file in ${filelist_optional}; do
 		fetch --retry -o "$destdir" "$ftphost/$file"
 	fi
 	if [ "$file" = "MANIFEST" ]; then
+		mkdir -p /usr/freebsd-dist/
 		if [ "x$distdir" = "x" ]; then
 		    cp -a "$destdir/$file" /usr/freebsd-dist/
 		else
@@ -493,16 +626,20 @@ cat <<EOF >$destdir/etc/rc.conf
 zfs_enable="YES"
 hostname="$hostname"
 sshd_enable="YES"
-sshd_flags="-oPort=22 -oCompression=yes -oPermitRootLogin=yes -oPasswordAuthentication=yes -oProtocol=2 -oUseDNS=no"
+sshd_flags="-oPort=22 -oCompression=yes -oPermitRootLogin=yes -oPasswordAuthentication=yes -oUseDNS=no"
 dumpdev="AUTO"
 EOF
+
+# enable on-boot ZFS key prompt for encrypted datasets
+if [ "$encryption_mode" = "native" ]; then
+	echo 'zfskeys_enable="YES"' >>$destdir/etc/rc.conf
+fi
 
 # apply DNS settings
 [ -n "$nameserver" ] && {
 	cat <<EOF >$destdir/etc/resolvconf.conf
-	nameserver $nameserver
-	nameserver "$nameserver"
-	resolv_conf_local_only="NO"
+name_servers="$nameserver"
+resolv_conf_local_only="NO"
 EOF
 	resolvconf -u
 }
@@ -542,38 +679,38 @@ cat $destdir/etc/rc.conf
 
 # put ssh_key
 root_dir=$destdir/root/.ssh
-mkdir ${root_dir} >>/dev/null
+mkdir -p "${root_dir}" >/dev/null 2>&1
 chmod 700 ${root_dir}
 # ${ssh_key_dir}/key[1..9].pub
 if [ -n "${ssh_key_dir}" ]; then
 	for url in ${ssh_key_dir}; do
-		if (ping -q -c3 $(echo $url | awk -F/ '{print $3;}') >/dev/null 2>&1); then
-			for i in $(seq 1 9); do
-				fetch -qo - $url/key$i.pub >>${root_dir}/authorized_keys
+		if (ping -q -c3 "$(echo "$url" | awk -F/ '{print $3;}')" >/dev/null 2>&1); then
+			for i in $(jot 9); do
+				fetch -qo - "$url/key$i.pub" >>"${root_dir}/authorized_keys"
 			done
-			chmod 600 ${root_dir}/authorized_keys
+			chmod 600 "${root_dir}/authorized_keys"
 			break
 		else
-			echo "no ping to host $(echo $url | awk -F/ '{print $3;}')"
+			echo "no ping to host $(echo "$url" | awk -F/ '{print $3;}')"
 		fi
 	done
 fi
 
 if [ -n "${ssh_key_file}" ]; then
 	for ssh_key in ${ssh_key_file}; do
-		if (ping -q -c3 $(echo ${ssh_key} | awk -F/ '{print $3;}') >/dev/null 2>&1); then
-			fetch -qo - ${ssh_key} >>${root_dir}/authorized_keys
-			chmod 600 ${root_dir}/authorized_keys
+		if (ping -q -c3 "$(echo "${ssh_key}" | awk -F/ '{print $3;}')" >/dev/null 2>&1); then
+			fetch -qo - "${ssh_key}" >>"${root_dir}/authorized_keys"
+			chmod 600 "${root_dir}/authorized_keys"
 			break
 		else
-			echo "no ping to host $(echo ${ssh_key} | awk -F/ '{print $3;}')"
+			echo "no ping to host $(echo "${ssh_key}" | awk -F/ '{print $3;}')"
 		fi
 	done
 fi
 
 cat <<EOF >>$destdir/boot/loader.conf
 zfs_load="YES"
-vfs.root.mountfrom="zfs:$poolname"
+vfs.root.mountfrom="zfs:$poolname/ROOT/default"
 kern.geom.label.gptid.enable=0
 kern.geom.label.disk_ident.enable=0
 debug.acpi.disabled="thermal"
@@ -605,32 +742,68 @@ fi
 # Options for tmux
 echo "set-option -g history-limit 300000" >>$destdir/root/.tmux.conf
 
-zfs set readonly=on $poolname/var/empty
+# Install bootcode
+if [ "$boot_mode" = "bios" ] || [ "$boot_mode" = "hybrid" ]; then
+	echo
+	echo "Installing BIOS bootcode on disks: "
+	for disk in $provider; do
+		get_disk_labelname
+		echo " ->  ${disk}"
+		gpart bootcode -b /boot/pmbr -p /boot/gptzfsboot -i 1 $disk
+	done
+fi
 
-echo
-echo "Installing new bootcode on disks: "
-for disk in $provider; do
-	get_disk_labelname
-	echo " ->  ${disk}"
-	gpart bootcode -b /boot/pmbr -p /boot/gptzfsboot -i 1 $disk
-done
-
-echo You\'ve just been chrooted into your fresh installation.
-echo passwd root
+if [ "$boot_mode" = "uefi" ] || [ "$boot_mode" = "hybrid" ]; then
+	echo
+	echo "Installing UEFI loader on disks: "
+	for disk in $provider; do
+		get_disk_labelname
+		echo " ->  ${disk}"
+		newfs_msdos -F 32 -c 1 /dev/gpt/efi-${label}
+		efi_mount=$(mktemp -d)
+		mount -t msdosfs /dev/gpt/efi-${label} ${efi_mount}
+		mkdir -p ${efi_mount}/EFI/BOOT
+		cp $destdir/boot/loader.efi ${efi_mount}/EFI/BOOT/BOOTX64.efi
+		# also install as the FreeBSD-specific path
+		mkdir -p ${efi_mount}/EFI/FreeBSD
+		cp $destdir/boot/loader.efi ${efi_mount}/EFI/FreeBSD/loader.efi
+		umount ${efi_mount}
+		rmdir ${efi_mount}
+	done
+fi
 
 cd /
-[ -d /usr/share/zoneinfo ] && file_timezone=/usr/share/zoneinfo/$timezone;
-chroot $destdir /bin/sh -c "hostname $hostname; make -C /etc/mail aliases;
-[ -e "${file_timezone}" ] && ln -s ${file_timezone} /etc/localtime;"
-echo "$password" | pw -V $destdir/etc usermod root -h 0
-chroot $destdir /bin/sh -c "cd /; umount /dev"
+
+# mount devfs for chroot-time commands (sendmail/newaliases need /dev/null)
+mount -t devfs devfs "$destdir/dev"
+
+# set localtime inside the new system
+if [ -d "$destdir/usr/share/zoneinfo" ] && [ -e "$destdir/usr/share/zoneinfo/$timezone" ]; then
+	chroot "$destdir" ln -sf "/usr/share/zoneinfo/$timezone" /etc/localtime \
+		|| echo "WARN: failed to set /etc/localtime"
+fi
+
+# hostname + mail aliases inside chroot
+env HOSTNAME_="$hostname" chroot "$destdir" /bin/sh -c \
+	'hostname "$HOSTNAME_"; make -C /etc/mail aliases' \
+	|| echo "WARN: chroot setup (hostname/aliases) failed"
+
+# set root password on target
+echo "$password" | pw -V "$destdir/etc" usermod root -h 0 \
+	|| echo "WARN: failed to set root password"
+
+# unmount devfs from outside chroot
+umount "$destdir/dev" || echo "WARN: could not unmount $destdir/dev"
+
+# create Ansible completion marker inside target system
+marker_name=$(basename "$(test -L "$0" && readlink "$0" || echo "$0")").completed
+touch "$destdir/root/$marker_name"
 
 zfs umount -a
-zfs set mountpoint=legacy $poolname
-zfs set mountpoint=/tmp $poolname/tmp
-zfs set mountpoint=/usr $poolname/usr
-zfs set mountpoint=/var $poolname/var
-swapoff /dev/gpt/swap-${label}
+for disk in $provider; do
+	get_disk_labelname
+	swapoff /dev/gpt/swap-${label}
+done
 
 echo zpool status:
 zpool status
@@ -638,7 +811,3 @@ echo
 echo "Please reboot the system from the harddisk(s), remove the FreeBSD media from you cdrom!"
 
 zpool export -f $poolname
-
-# for Ansible
-file234=/root/"$(basename "$(test -L "$0" && readlink "$0" || echo "$0")")".completed
-touch "$file234"
