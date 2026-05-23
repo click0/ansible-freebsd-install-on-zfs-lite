@@ -9,22 +9,28 @@ Feel free to [share your feedback and report issues](https://github.com/click0/a
 
 ## Synopsis
 
-This role acts as a runner for a single [`gozfs.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/gozfs.sh).  
+This role acts as a runner for the [`gozfs.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/gozfs.sh)
+and its 512-byte-sector variant `gozfs_512b.sh`.  
 (That's why there is `lite` in the role name too)  
 The role expects [MfsBSD](https://mfsbsd.vx.sk) as `standard` to be already running on the remote host (`mini` is an insufficient set of packages, `se` is oversized by the FreeBSD archives).  
-The role installs the python2 package and uploads the script `gozfs.sh` to host.  
-The bundled `files/gozfs.sh` is **v1.60** and supports 512b/4k/8k ashift natively, so the
-external `gozfs_512b.sh` script is no longer required (set `fiozl_ashift_disk: '512b'`).  
+The role installs the python2 package and uploads both scripts to the host; `fiozl_script_name` selects which one is executed.  
+The bundled scripts are **v2.00**:
+- `gozfs.sh` — for advanced-format disks. It wraps the ZFS partition in a
+  `gnop` device to force the pool ashift; choose the alignment with
+  `fiozl_ashift_disk` (`4k` default, or `8k`).
+- `gozfs_512b.sh` — for disks with native 512-byte sectors (no `gnop`
+  wrapper, no `gpart` alignment override). Select it with
+  `fiozl_script_name: 'gozfs_512b.sh'`; `fiozl_ashift_disk` is ignored.
+
 The script does the following:  
 - clears the disks specified in the script arguments.
 - creates a ZFS pool and partition structure (BIOS, UEFI or hybrid layout).
 - creates a Boot-Environment-aware root: `<pool>/ROOT/default` is mounted as `/`
   and registered as `bootfs`, ready to be cloned by `bectl`.
-- optionally creates an aes-256-gcm encrypted dataset `<pool>/encrypted`
-  (OpenZFS native encryption, unlocked at boot via the `zfskeys` rc service).
 - unpacks FreeBSD archives from the specified FTP/http/https host
   (optionally including debug sets: `base-dbg`, `lib32-dbg`, `kernel-dbg`).
-- makes initial network settings and starts `sshd`.
+- makes initial network settings (DHCP or a static CIDR address) and starts `sshd`.
+- writes the target system DNS servers (`fiozl_nameserver`, option `-N`).
 - downloads ssh keys (you will have to provide your http/https addresses).
 - sets the password `root`/`mfsroot123` (you can set your own password in the script arguments).
 Then the role itself will reboot the remote host on its own.  
@@ -37,51 +43,40 @@ See the `defaults/main.yml` and examples in vars.
 
 | Variable | Default | Description |
 | --- | --- | --- |
+| `fiozl_script_name` | `gozfs.sh` | Which bundled script to run: `gozfs.sh` (4k/8k) or `gozfs_512b.sh` (512-byte sectors). |
 | `fiozl_provider` | `[ada0]` | List of GEOM providers to install onto. Each item may be `disk` or `disk=label`. |
 | `fiozl_poolname` | `zroot` | Name of the new zpool. |
 | `fiozl_mode` | _auto_ | `stripe`, `mirror`, `raidz`, `raid10` (auto-picked from disk count when empty). |
 | `fiozl_swap_partition_size` | `512M` | Size of the per-disk freebsd-swap partition (`0` to skip). |
-| `fiozl_zfs_partition_size` | _full disk_ | Size of the freebsd-zfs partition. |
-| `fiozl_ashift_disk` | `4k` | One of `512b`, `4k`, `8k`. |
-| `fiozl_ftphost` | 15.0-RELEASE | Source URL for `base/lib32/kernel/MANIFEST` archives. |
+| `fiozl_zfs_partition_size` | _full disk_ | Size of the freebsd-zfs partition (accepts human sizes, e.g. `10G`). |
+| `fiozl_ashift_disk` | `4k` | `4k` or `8k` (only `gozfs.sh`; `gozfs_512b.sh` ignores it). |
+| `fiozl_ftphost` | 12.4-RC2 | Source URL for `base/lib32/kernel/MANIFEST` archives. |
 | `fiozl_distdir` | _empty_ | Local directory on MfsBSD with pre-fetched `*.txz`. |
 | `fiozl_hostname` | `core.domain.com` | Hostname for the new system. |
 | `fiozl_password` | `mfsroot123` | Initial root password on the installed system. |
 | `fiozl_timezone` | `Europe/Kyiv` | Timezone link for `/etc/localtime`. |
 | `fiozl_url_ssh_key_file` | _list of urls_ | Plain `authorized_keys` URLs to fetch. |
 | `fiozl_url_ssh_key_dir` | _list of urls_ | Directories on the web with `key1.pub`..`key9.pub`. |
-| `fiozl_file_zfs_skeleton` | _empty_ | Local skeleton script (see `templates/zfs_skeleton.example`). |
-| `fiozl_url_file_zfs_skeleton` | _empty_ | Same idea, fetched over HTTP. |
-| `fiozl_gateway`, `fiozl_ip` | `auto` / _empty_ | Static network override; otherwise DHCP. |
+| `fiozl_file_zfs_skeleton` | _empty_ | Local skeleton script on the installer (see `templates/zfs_skeleton.example`), option `-z`. |
+| `fiozl_url_file_zfs_skeleton` | _empty_ | Same idea, fetched over HTTP into `/tmp/zfs_skeleton.sh` and executed, option `-Z`. |
+| `fiozl_gateway`, `fiozl_ip` | `auto` / _empty_ | Static network override (`fiozl_ip` accepts `addr/prefix`); otherwise DHCP. |
 
-#### New options (gozfs.sh ≥ 1.60)
+#### New options (gozfs.sh ≥ 2.00)
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `fiozl_boot_mode` | `auto` | `bios`, `uefi`, `hybrid` or `auto` (detect via `machdep.bootmethod` / `/sys/firmware/efi`). `uefi`/`hybrid` create an 800 MB EFI System Partition per disk and install `loader.efi` to both `EFI/BOOT/BOOTX64.efi` and `EFI/FreeBSD/loader.efi`. |
-| `fiozl_encryption_mode` | `none` | `native` enables OpenZFS native encryption: extra dataset `<pool>/encrypted` is created with `encryption=aes-256-gcm`, `keyformat=passphrase`, `keylocation=prompt`. The `zfskeys_enable="YES"` line is added to `rc.conf` so the system prompts on boot. |
-| `fiozl_encrypt_passphrase` | _empty_ | **Literal** passphrase. If non-empty and `fiozl_encryption_mode == 'native'`, the role uploads it (mode `0600`) to the MfsBSD host and feeds it to the script via `-e`. Mark `no_log: true` and/or store with `ansible-vault`. |
-| `fiozl_encrypt_passphrase_file` | _empty_ | Path **on the MfsBSD host** to a pre-placed passphrase file. Used as-is when `fiozl_encrypt_passphrase` is empty. |
+| `fiozl_boot_mode` | `auto` | `bios`, `uefi`, `hybrid` or `auto` (detect via `machdep.bootmethod` / `/sys/firmware/efi`). `uefi`/`hybrid` create an 800 MB EFI System Partition per disk and install `loader.efi` to both `EFI/BOOT/BOOTX64.efi` and `EFI/FreeBSD/loader.efi`. Option `-B`. |
 | `fiozl_install_debug` | `false` | When `true`, also unpacks `base-dbg.txz`, `lib32-dbg.txz`, `kernel-dbg.txz` (passes `-x` to the script). |
-| `fiozl_ashift_disk: '512b'` | _-_ | Replacement for the old `gozfs_512b.sh` script (no `gnop` wrapper, no 4k alignment override). |
+| `fiozl_iface` | _empty_ | Network interface for the installed system. Auto-detected when empty, but **required** when `fiozl_ip` is a static address. Option `-i`. |
+| `fiozl_ip` | _empty_ | `''`/`DHCP` (DHCP), `auto` (reuse the live IP), or a static `addr/prefix` such as `10.0.0.101/24`. Option `-I`. |
+| `fiozl_nameserver` | _empty_ | DNS servers for the target system, comma- or space-separated (e.g. `8.8.8.8,1.1.1.1`). Writes `/etc/resolv.conf` and `/etc/resolvconf.conf`. Option `-N`. |
+| 512-byte-sector disks | _-_ | Set `fiozl_script_name: 'gozfs_512b.sh'` (the dedicated variant without the `gnop` wrapper). |
 
 The created pool always uses a Boot-Environment-aware layout: `<pool>/ROOT/default`
 is the active root and `bootfs`, ready for `bectl create`/`bectl activate`.
 
-### Encryption: how it works
-
-When `fiozl_encryption_mode: native` is set, `gozfs.sh`:
-
-1. writes the passphrase from one of (in priority order):
-   - `-e <file>` (set automatically by this role from `fiozl_encrypt_passphrase`),
-   - the `ZFS_ENCRYPT_PASSPHRASE` environment variable,
-   - an interactive `stty -echo` prompt (only useful when running the script by hand);
-2. creates `<poolname>/encrypted` with `aes-256-gcm`, mounted at `/encrypted`;
-3. immediately switches the dataset to `keylocation=prompt` so no plaintext key
-   stays on disk;
-4. enables `zfskeys_enable="YES"` in `rc.conf` so the key is requested at boot.
-
-The passphrase must be at least 8 characters.
+> Note: the bundled scripts do **not** include ZFS native encryption. If you
+> need it, track the encryption-enabled branch of `gozfs.sh` upstream.
 
 ## Workflow
 
@@ -113,7 +108,7 @@ shell> cat install_freebsd_in_mfsbsd.yml
 
 ```
 
-### Example: UEFI + native encryption + debug sets
+### Example: UEFI + static network + debug sets
 
 ```yaml
 - hosts: MfsBSD_server
@@ -126,11 +121,27 @@ shell> cat install_freebsd_in_mfsbsd.yml
     fiozl_poolname: 'zroot'
     fiozl_hostname: 'host1.example.org'
     fiozl_boot_mode: 'uefi'
-    fiozl_encryption_mode: 'native'
-    fiozl_encrypt_passphrase: '{{ vault_zfs_passphrase }}'   # ansible-vault
+    fiozl_iface: 'igb0'              # required for a static address
+    fiozl_ip: '10.0.0.101/24'
+    fiozl_gateway: '10.0.0.1'
+    fiozl_nameserver: '8.8.8.8,1.1.1.1'
     fiozl_install_debug: true
     fiozl_url_ssh_key_file:
       - 'https://example.org/keys/admin.pub'
+  roles:
+    - click0.freebsd-install-on-zfs-lite
+```
+
+### Example: disk with native 512-byte sectors
+
+```yaml
+- hosts: MfsBSD_server
+  gather_facts: false
+  vars:
+    fiozl_script_name: 'gozfs_512b.sh'
+    fiozl_provider:
+      - 'ada0'
+    fiozl_poolname: 'zroot'
   roles:
     - click0.freebsd-install-on-zfs-lite
 ```
