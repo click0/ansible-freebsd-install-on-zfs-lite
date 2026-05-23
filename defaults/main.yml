@@ -1,6 +1,6 @@
 ---
 
-fiozl_script_name: 'gozfs.sh'  # 'gozfs.sh' (4k/ashift) or 'gozfs_512b.sh' (512-byte sectors)
+fiozl_script_name: 'gozfs.sh'  # 'gozfs.sh' (4k/8k) or 'gozfs_512b.sh' (512-byte sectors)
 fiozl_end_suffix: completed
 fiozl_tmux_tab_name: 'Install_FreeBSD'
 
@@ -34,6 +34,16 @@ fiozl_password: ''  # default mfsroot123
 fiozl_gateway: 'auto' # or IP or DHCP
 fiozl_reboot_timeout: '300' # seconds
 
+# ZFS native encryption (optional). Creates an extra dataset <pool>/encrypted
+# (aes-256-gcm), unlocked at boot via the zfskeys rc service.
+fiozl_encryption_mode: '' # '' / 'none' (default), or 'native'
+# Literal passphrase. When set (and mode is native) the role uploads it to the
+# host (mode 0600) and feeds it to the script via -e. Use ansible-vault!
+fiozl_encrypt_passphrase: ''
+# Path ON the MfsBSD host to a pre-placed passphrase file. Used when
+# fiozl_encrypt_passphrase is empty.
+fiozl_encrypt_passphrase_file: ''
+
 # yaml syntax:
 # https://yaml-multiline.info/
 fiozl_script_options: '
@@ -56,9 +66,11 @@ fiozl_script_options: '
  -I ''{{ fiozl_ip }}''
  -N ''{{ fiozl_nameserver }}''
  -B ''{{ fiozl_boot_mode }}''
+ -E ''{{ fiozl_encryption_mode }}''
  -t ''{{ fiozl_timezone }}''
  -z ''{{ fiozl_file_zfs_skeleton }}''
  -Z ''{{ fiozl_url_file_zfs_skeleton }}''
 {% if fiozl_script_name != "gozfs_512b.sh" %} -a ''{{ fiozl_ashift_disk }}''{% endif %}
+{% if fiozl_encrypt_passphrase | length > 0 %} -e ''/root/.zfs_passphrase''{% elif fiozl_encrypt_passphrase_file | length > 0 %} -e ''{{ fiozl_encrypt_passphrase_file }}''{% endif %}
 {% if fiozl_install_debug %} -x{% endif %}
 '

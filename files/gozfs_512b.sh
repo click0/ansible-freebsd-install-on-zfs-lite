@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Current Version: 2.00
+# Current Version: 2.10
 
 # original script by Philipp Wuensche at http://anonsvn.h3q.com/s/gpt-zfsroot.sh
 # This script is considered beer ware (http://en.wikipedia.org/wiki/Beerware)
@@ -63,11 +63,18 @@ memdisknumber=10
 
 usage="Usage: $0 -p <geom_provider> -s <swap_partition_size> -S <zfs_partition_size> -n <zpoolname> -f <ftphost>
 [ -m <zpool-raidmode> -d <distribution_dir> -D <destination_dir> -M <size_memory_disk> -o <offset_end_disk>
--B <boot_mode> -P <new_password> -t <timezone> -k <url_ssh_key_file> -K <url_ssh_key_dir>
+-B <boot_mode> -E <encryption_mode> -P <new_password> -t <timezone> -k <url_ssh_key_file> -K <url_ssh_key_dir>
 -z <file_zfs_skeleton> -Z <url_file_zfs_skeleton> -x ]
 [ -g <gateway> [-i <iface>] -I <IP_address/mask> -N <dns1,dns2,...> ]
 
 boot_mode: auto (default), bios, uefi, hybrid
+encryption_mode: none (default), native
+  When 'native': creates an extra encrypted dataset <poolname>/encrypted
+  with aes-256-gcm. Passphrase source (in priority order):
+    -e <file>  --  read passphrase from file (recommended; avoids shell quoting)
+    \$ZFS_ENCRYPT_PASSPHRASE env var
+    interactive prompt
+  Unlocked at boot via the zfskeys rc service.
 -x: also install debug distribution sets (base-dbg, lib32-dbg, kernel-dbg)
 -N: comma- or space-separated DNS servers for the target system"
 
@@ -76,7 +83,7 @@ exerr() {
 	exit 1
 }
 
-while getopts p:P:s:S:n:N:h:f:m:M:o:d:D:t:g:i:I:B:z:Z:k:K:x arg; do
+while getopts p:P:s:S:n:N:h:f:m:M:o:d:D:t:g:i:I:B:E:e:z:Z:k:K:x arg; do
 	case ${arg} in
 	p) provider="$provider ${OPTARG}" ;;
 	P) password=${OPTARG} ;;
@@ -96,6 +103,8 @@ while getopts p:P:s:S:n:N:h:f:m:M:o:d:D:t:g:i:I:B:z:Z:k:K:x arg; do
 	i) iface=${OPTARG}; iface_cli=${OPTARG} ;;
 	I) ip_address=${OPTARG} ;;
 	B) boot_mode=${OPTARG} ;;
+	E) encryption_mode=${OPTARG} ;;
+	e) encrypt_passphrase_file=${OPTARG} ;;
 	z) file_zfs_skeleton=${OPTARG} ;;
 	Z) url_file_zfs_skeleton=${OPTARG} ;;
 	k) ssh_key_file="${ssh_key_file} ${OPTARG}" ;;
@@ -131,6 +140,42 @@ fi
 									# 1 MB approximately for every full and partial 1 TB of disk capacity.
 destdir=${destdir:-/mnt}
 esp_size="800m"						# EFI System Partition size
+
+# Encryption mode (default: off)
+[ -z "$encryption_mode" ] && encryption_mode="none"
+case "$encryption_mode" in
+	none|native) ;;
+	*) exerr "Invalid encryption mode: $encryption_mode. Use none or native." ;;
+esac
+
+encrypt_keyfile=""
+if [ "$encryption_mode" = "native" ]; then
+	encrypt_keyfile=$(mktemp /tmp/zfs_passphrase.XXXXXX) || exerr "Cannot create passphrase tempfile"
+	chmod 600 "$encrypt_keyfile"
+	if [ -n "$encrypt_passphrase_file" ]; then
+		# Most shell-portable path (csh-friendly, no quoting hazards).
+		[ -r "$encrypt_passphrase_file" ] || {
+			rm -f "$encrypt_keyfile"
+			exerr "Passphrase file not readable: $encrypt_passphrase_file"
+		}
+		# Strip any trailing newline so 'echo passphrase > file' just works.
+		awk 'NR==1{printf "%s", $0; exit}' "$encrypt_passphrase_file" > "$encrypt_keyfile"
+	elif [ -n "$ZFS_ENCRYPT_PASSPHRASE" ]; then
+		printf '%s' "$ZFS_ENCRYPT_PASSPHRASE" > "$encrypt_keyfile"
+	else
+		printf 'Enter ZFS encryption passphrase (>=8 chars): ' >&2
+		stty -echo 2>/dev/null
+		IFS= read -r encrypt_passphrase
+		stty echo 2>/dev/null
+		echo >&2
+		if [ "${#encrypt_passphrase}" -lt 8 ]; then
+			rm -f "$encrypt_keyfile"
+			exerr "Passphrase too short (need >=8 chars)"
+		fi
+		printf '%s' "$encrypt_passphrase" > "$encrypt_keyfile"
+		unset encrypt_passphrase
+	fi
+fi
 
 # optionally add debug distribution sets
 if [ "${install_debug}" = "1" ]; then
@@ -469,6 +514,23 @@ zfs create                      -o exec=on      -o setuid=off   $poolname/var/tm
 
 fi
 
+# Optional: create encrypted dataset (ZFS native encryption, OpenZFS 2.0+)
+if [ "$encryption_mode" = "native" ]; then
+	echo "Creating encrypted dataset $poolname/encrypted (aes-256-gcm)"
+	zfs create \
+		-o encryption=aes-256-gcm \
+		-o keyformat=passphrase \
+		-o keylocation=file://"$encrypt_keyfile" \
+		-o mountpoint=/encrypted \
+		"$poolname/encrypted" || {
+			rm -f "$encrypt_keyfile"
+			exerr "Failed to create encrypted dataset (does the pool support feature@encryption?)"
+		}
+	# switch to prompt-on-boot so no plaintext key remains on disk
+	zfs set keylocation=prompt "$poolname/encrypted"
+	rm -f "$encrypt_keyfile"
+fi
+
 zpool export $poolname
 zpool import -f -d /dev/gpt/ -o altroot=$destdir -o cachefile=/tmp/zpool.cache $poolname
 
@@ -533,6 +595,11 @@ sshd_enable="YES"
 sshd_flags="-oPort=22 -oCompression=yes -oPermitRootLogin=yes -oPasswordAuthentication=yes -oUseDNS=no"
 dumpdev="AUTO"
 EOF
+
+# enable on-boot ZFS key prompt for encrypted datasets
+if [ "$encryption_mode" = "native" ]; then
+	echo 'zfskeys_enable="YES"' >>$destdir/etc/rc.conf
+fi
 
 # apply DNS settings to target
 if [ -n "$nameserver" ]; then

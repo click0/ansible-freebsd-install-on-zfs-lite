@@ -9,3 +9,13 @@
     dest: /root/
     mode: '0644'
     # (default) overwrite on source change
+
+- name: Upload ZFS encryption passphrase (only when set inline)
+  when:
+    - fiozl_encryption_mode == 'native'
+    - fiozl_encrypt_passphrase | length > 0
+  no_log: true
+  copy:
+    content: '{{ fiozl_encrypt_passphrase }}'
+    dest: /root/.zfs_passphrase
+    mode: '0600'
