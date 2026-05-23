@@ -62,7 +62,7 @@ memdisknumber=10
 #manual_iface_v6='ifconfig_vtnet0_ipv6=""2001:41d0:0005:1000:0000:0000:0000:abcd/64"'	# interface IP
 
 usage="Usage: $0 -p <geom_provider> -s <swap_partition_size> -S <zfs_partition_size> -n <zpoolname> -f <ftphost>
-[ -m <zpool-raidmode> -d <distribution_dir> -D <destination_dir> -M <size_memory_disk> -o <offset_end_disk> -a <ashift_disk>
+[ -m <zpool-raidmode> -d <distribution_dir> -D <destination_dir> -M <size_memory_disk> -o <offset_end_disk>
 -B <boot_mode> -P <new_password> -t <timezone> -k <url_ssh_key_file> -K <url_ssh_key_dir>
 -z <file_zfs_skeleton> -Z <url_file_zfs_skeleton> -x ]
 [ -g <gateway> [-i <iface>] -I <IP_address/mask> -N <dns1,dns2,...> ]
@@ -76,7 +76,7 @@ exerr() {
 	exit 1
 }
 
-while getopts p:P:s:S:n:N:h:f:m:M:o:d:D:t:g:i:I:a:B:z:Z:k:K:x arg; do
+while getopts p:P:s:S:n:N:h:f:m:M:o:d:D:t:g:i:I:B:z:Z:k:K:x arg; do
 	case ${arg} in
 	p) provider="$provider ${OPTARG}" ;;
 	P) password=${OPTARG} ;;
@@ -95,7 +95,6 @@ while getopts p:P:s:S:n:N:h:f:m:M:o:d:D:t:g:i:I:a:B:z:Z:k:K:x arg; do
 	g) gateway=${OPTARG} ;;
 	i) iface=${OPTARG}; iface_cli=${OPTARG} ;;
 	I) ip_address=${OPTARG} ;;
-	a) ashift=${OPTARG} ;;
 	B) boot_mode=${OPTARG} ;;
 	z) file_zfs_skeleton=${OPTARG} ;;
 	Z) url_file_zfs_skeleton=${OPTARG} ;;
@@ -128,7 +127,6 @@ fi
 [ -z "$memdisksize" ] && memdisksize=350M # deprecated
 [ -z "$password" ] && password="mfsroot123"
 [ -z "$hostname" ] && hostname="core.domain.com"
-[ -z "$ashift" ] && ashift="4k"		# 4k or 8k
 [ -z "$offset" ] && offset="2048"	# remainder at the end of the disc, 1 MB
 									# 1 MB approximately for every full and partial 1 TB of disk capacity.
 destdir=${destdir:-/mnt}
@@ -195,7 +193,8 @@ fi
 
 sysctl kern.geom.label.gptid.enable=0
 sysctl kern.geom.debugflags=16
-# sysctl vfs.zfs.min_auto_ashift=13	# need module zfs
+# sysctl vfs.zfs.min_auto_ashift=12	# need module zfs
+
 
 if [ -n "$distdir" ]; then
 	if [ ! -d "$distdir" ]; then
@@ -329,7 +328,7 @@ if [ "$boot_mode" = "bios" ] || [ "$boot_mode" = "hybrid" ]; then
 	for disk in $provider; do
 		get_disk_labelname
 		echo " ->  ${disk}"
-		gpart add -s 1024 -t freebsd-boot -a $ashift -l boot-${counter} $disk >/dev/null
+		gpart add -s 1024 -t freebsd-boot -l boot-${counter} $disk >/dev/null
 		counter=$((counter + 1))
 	done
 fi
@@ -341,7 +340,7 @@ if [ "$boot_mode" = "uefi" ] || [ "$boot_mode" = "hybrid" ]; then
 	for disk in $provider; do
 		get_disk_labelname
 		echo " ->  ${disk}"
-		gpart add -s ${esp_size} -t efi -a $ashift -l efi-${label} $disk >/dev/null
+		gpart add -s ${esp_size} -t efi -l efi-${label} $disk >/dev/null
 		counter=$((counter + 1))
 	done
 fi
@@ -351,7 +350,7 @@ if [ "${swap_partition_size}" ] && [ "${swap_partition_size}" != "0" ]; then
 	for disk in $provider; do
 		get_disk_labelname
 		echo " ->  ${disk} (Label: ${label})"
-		gpart add -s "${swap_partition_size}" -t freebsd-swap -a $ashift -l swap-"${label}" ${disk} >/dev/null
+		gpart add -s "${swap_partition_size}" -t freebsd-swap -l swap-"${label}" ${disk} >/dev/null
 		swapon /dev/gpt/swap-${label}
 	done
 fi
@@ -374,10 +373,10 @@ fi
 for disk in $provider; do
 	get_disk_labelname
 	echo " ->  ${disk} (Label: ${label})"
-	gpart add -t freebsd-zfs ${size_string} -a $ashift -l system-${label} ${disk} >/dev/null
+	gpart add -t freebsd-zfs ${size_string} -l system-${label} ${disk} >/dev/null
 
 	counter=$((counter + 1))
-	labellist="${labellist} gpt/system-${label}.nop"
+	labellist="${labellist} gpt/system-${label}"
 	if [ "$((counter % 2))" -eq "0" ] && [ "$devcount" -ne "$counter" ] && [ "$mode" = "raid10" ]; then
 		labellist="${labellist} mirror "
 	fi
@@ -391,24 +390,11 @@ ls -l /dev/gpt/
 
 if ! /sbin/kldstat -m zfs >/dev/null 2>&1; then
 	/sbin/kldload zfs >/dev/null 2>&1
-	sysctl vfs.zfs.min_auto_ashift=13 # need module zfs
-fi
-if ! /sbin/kldstat -m g_nop >/dev/null 2>&1; then
-	/sbin/kldload geom_nop.ko >/dev/null 2>&1
+	sysctl vfs.zfs.min_auto_ashift=12	# need module zfs
 fi
 
 # we need to create /boot/zfs so zpool.cache can be written.
 [ ! -d /boot/zfs ] && mkdir /boot/zfs
-
-# create gnop
-[ "$ashift" = "4k" ] && gnop_ashift=4096
-[ "$ashift" = "8k" ] && gnop_ashift=8192
-for disk in $provider; do
-	get_disk_labelname
-	gnop create -S ${gnop_ashift} /dev/gpt/system-${label} >/dev/null
-done
-# Show gnop output
-gnop list
 
 zpool_option="-o altroot=$destdir -o cachefile=/tmp/zpool.cache"
 # Create the pool and the rootfs
@@ -432,12 +418,6 @@ if [ "$(zpool list -H -o name $poolname)" != "$poolname" ]; then
 fi
 
 zpool export $poolname
-
-# destroy gnop
-for disk in $provider; do
-	get_disk_labelname
-	gnop destroy /dev/gpt/system-${label}.nop >/dev/null
-done
 ls -l /dev/gpt/
 sleep 3
 zpool import ${zpool_option} $poolname

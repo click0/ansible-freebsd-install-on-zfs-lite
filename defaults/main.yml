@@ -1,6 +1,6 @@
 ---
 
-fiozl_script_name: 'gozfs.sh'
+fiozl_script_name: 'gozfs.sh'  # 'gozfs.sh' (4k/ashift) or 'gozfs_512b.sh' (512-byte sectors)
 fiozl_end_suffix: completed
 fiozl_tmux_tab_name: 'Install_FreeBSD'
 
@@ -10,56 +10,29 @@ fiozl_provider:
 fiozl_swap_partition_size: '512M'
 fiozl_zfs_partition_size: ''  # full disk minus {{ fiozl_offset_end_disk }}
 fiozl_poolname: 'zroot'
-fiozl_ashift_disk: '' # default - '4k'; one of '512b', '4k', '8k'
+fiozl_ashift_disk: '' # default - '4k', or '8k' (only gozfs.sh; gozfs_512b.sh ignores it)
+fiozl_boot_mode: '' # default - 'auto' (auto-detect). Options: auto | bios | uefi | hybrid
+fiozl_install_debug: false # -x: also install debug sets (base-dbg, lib32-dbg, kernel-dbg)
 fiozl_hostname: '' # default - 'core.domain.com'
-fiozl_ftphost: 'http://ftp.freebsd.org/pub/FreeBSD/releases/amd64/15.0-RELEASE/'
+fiozl_ftphost: 'http://ftp.freebsd.org/pub/FreeBSD/releases/amd64/12.4-RC2/' # url_dir (12.3)
 fiozl_mode: '' # Single disk - stripe
 fiozl_distdir: ''
 fiozl_destdir: '' # default - '/mnt'
 fiozl_timezone: '' # default - 'Europe/Kyiv'
 fiozl_memdisksize: '' # default - '350' MB # deprecated
-fiozl_offset_end_disk: '' # default - '1' MB
+fiozl_offset_end_disk: '' # default - '2048' sectors (~1 MB)
+fiozl_iface: '' # autodetected when empty; REQUIRED when fiozl_ip is a static address
+fiozl_ip: '' # '' / 'DHCP' / 'auto' / '10.0.0.101/24'
+fiozl_nameserver: '' # -N: DNS servers for target system, comma/space separated, e.g. '8.8.8.8,1.1.1.1'
 fiozl_url_ssh_key_file:
   - '' # url of a single ssh key file
 fiozl_url_ssh_key_dir:
   - '' #  ${url_ssh_key_dir}/key[1..9].pub
-fiozl_file_zfs_skeleton: '' # look template templates/zfs_skeleton.example
-fiozl_url_file_zfs_skeleton: ''
+fiozl_file_zfs_skeleton: '' # path to a local zfs skeleton file inside the installer
+fiozl_url_file_zfs_skeleton: '' # URL fetched to /tmp/zfs_skeleton.sh and executed
 fiozl_password: ''  # default mfsroot123
 fiozl_gateway: 'auto' # or IP or DHCP
-fiozl_ip: '' # 10.0.0.101/24
 fiozl_reboot_timeout: '300' # seconds
-
-# New options (gozfs.sh >= 1.60)
-
-# Boot loader scheme:
-#   ''       - auto-detect (default in script)
-#   'bios'   - legacy BIOS only (freebsd-boot + gptzfsboot)
-#   'uefi'   - UEFI only (EFI System Partition + loader.efi)
-#   'hybrid' - both BIOS and UEFI partitions (dual-boot capable media)
-fiozl_boot_mode: ''
-
-# ZFS native encryption (OpenZFS 2.0+):
-#   'none'   - no extra encrypted dataset (default in script)
-#   'native' - create extra dataset <poolname>/encrypted (aes-256-gcm,
-#              keyformat=passphrase). Unlocked at boot via zfskeys rc service.
-fiozl_encryption_mode: ''
-
-# Path on the MfsBSD host with the passphrase (single line, no trailing newline
-# is enforced by the script). Used only when fiozl_encryption_mode == 'native'.
-# If you also set fiozl_encrypt_passphrase below, the role will write that
-# value into this path automatically (default /root/.zfs_passphrase).
-fiozl_encrypt_passphrase_file: ''
-
-# Literal passphrase. If non-empty AND fiozl_encryption_mode == 'native',
-# the role uploads it (mode 0600) to {{ fiozl_encrypt_passphrase_file
-# | default('/root/.zfs_passphrase', true) }} on the MfsBSD host and passes
-# it to the script via -e. Mark this value with `no_log: true` in your
-# inventory or pass it through ansible-vault.
-fiozl_encrypt_passphrase: ''
-
-# Install debug distribution sets (base-dbg, lib32-dbg, kernel-dbg).
-fiozl_install_debug: false
 
 # yaml syntax:
 # https://yaml-multiline.info/
@@ -79,10 +52,13 @@ fiozl_script_options: '
  -K ''{{ fiozl_url_ssh_key_dir }}''
  -D ''{{ fiozl_destdir }}''
  -g ''{{ fiozl_gateway }}''
- -a ''{{ fiozl_ashift_disk }}''
- -t ''{{ fiozl_timezone }}''
+ -i ''{{ fiozl_iface }}''
+ -I ''{{ fiozl_ip }}''
+ -N ''{{ fiozl_nameserver }}''
  -B ''{{ fiozl_boot_mode }}''
- -E ''{{ fiozl_encryption_mode }}''
- -e ''{{ _fiozl_effective_passphrase_file | default(fiozl_encrypt_passphrase_file) }}''
- {% if fiozl_install_debug %} -x{% endif %}
+ -t ''{{ fiozl_timezone }}''
+ -z ''{{ fiozl_file_zfs_skeleton }}''
+ -Z ''{{ fiozl_url_file_zfs_skeleton }}''
+{% if fiozl_script_name != "gozfs_512b.sh" %} -a ''{{ fiozl_ashift_disk }}''{% endif %}
+{% if fiozl_install_debug %} -x{% endif %}
 '
