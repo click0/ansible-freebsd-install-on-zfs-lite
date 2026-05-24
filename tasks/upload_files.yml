@@ -1,30 +1,21 @@
 ---
 
-- name: Upload main script
+- name: Upload multiple files
+  with_items:
+    - 'gozfs.sh'
+    - 'gozfs_512b.sh'
   copy:
-    src: '{{ fiozl_script_name }}'
+    src: '{{ item }}'
     dest: /root/
     mode: '0644'
     # (default) overwrite on source change
 
-- name: Compute effective ZFS passphrase file path
-  ansible.builtin.set_fact:
-    _fiozl_effective_passphrase_file: >-
-      {{ fiozl_encrypt_passphrase_file
-         if fiozl_encrypt_passphrase_file | length > 0
-         else '/root/.zfs_passphrase' }}
+- name: Upload ZFS encryption passphrase (only when set inline)
   when:
     - fiozl_encryption_mode == 'native'
     - fiozl_encrypt_passphrase | length > 0
-
-- name: Upload ZFS encryption passphrase
-  ansible.builtin.copy:
-    content: '{{ fiozl_encrypt_passphrase }}'
-    dest: '{{ _fiozl_effective_passphrase_file }}'
-    mode: '0600'
-    owner: root
-    group: wheel
   no_log: true
-  when:
-    - fiozl_encryption_mode == 'native'
-    - fiozl_encrypt_passphrase | length > 0
+  copy:
+    content: '{{ fiozl_encrypt_passphrase }}'
+    dest: /root/.zfs_passphrase
+    mode: '0600'
