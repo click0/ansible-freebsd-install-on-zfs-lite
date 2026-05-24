@@ -9,18 +9,17 @@ Feel free to [share your feedback and report issues](https://github.com/click0/a
 
 ## Synopsis
 
-This role acts as a runner for the [`gozfs.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/gozfs.sh)
-and its 512-byte-sector variant `gozfs_512b.sh`.  
+This role acts as a runner for the single [`gozfs.sh` script](https://github.com/click0/FreeBSD-install-scripts/blob/master/gozfs.sh).  
 (That's why there is `lite` in the role name too)  
 The role expects [MfsBSD](https://mfsbsd.vx.sk) as `standard` to be already running on the remote host (`mini` is an insufficient set of packages, `se` is oversized by the FreeBSD archives).  
-The role installs the python2 package and uploads both scripts to the host; `fiozl_script_name` selects which one is executed.  
-The bundled scripts are **v2.10**:
-- `gozfs.sh` — for advanced-format disks. It wraps the ZFS partition in a
-  `gnop` device to force the pool ashift; choose the alignment with
-  `fiozl_ashift_disk` (`4k` default, or `8k`).
-- `gozfs_512b.sh` — for disks with native 512-byte sectors (no `gnop`
-  wrapper, no `gpart` alignment override). Select it with
-  `fiozl_script_name: 'gozfs_512b.sh'`; `fiozl_ashift_disk` is ignored.
+The role installs the python2 package and uploads `gozfs.sh` to the host.  
+The bundled script is **v2.20** and covers every sector size through the
+`fiozl_ashift_disk` option (the former separate `gozfs_512b.sh` has been
+merged in):
+- `4k` (default) / `8k` — advanced-format disks. The ZFS partition is wrapped
+  in a `gnop` device to force the pool ashift.
+- `512b` — disks with native 512-byte sectors. No `gnop` wrapper, no `gpart`
+  alignment override (`vfs.zfs.min_auto_ashift=12`).
 
 The script does the following:  
 - clears the disks specified in the script arguments.
@@ -45,13 +44,12 @@ See the `defaults/main.yml` and examples in vars.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `fiozl_script_name` | `gozfs.sh` | Which bundled script to run: `gozfs.sh` (4k/8k) or `gozfs_512b.sh` (512-byte sectors). |
 | `fiozl_provider` | `[ada0]` | List of GEOM providers to install onto. Each item may be `disk` or `disk=label`. |
 | `fiozl_poolname` | `zroot` | Name of the new zpool. |
 | `fiozl_mode` | _auto_ | `stripe`, `mirror`, `raidz`, `raid10` (auto-picked from disk count when empty). |
 | `fiozl_swap_partition_size` | `512M` | Size of the per-disk freebsd-swap partition (`0` to skip). |
 | `fiozl_zfs_partition_size` | _full disk_ | Size of the freebsd-zfs partition (accepts human sizes, e.g. `10G`). |
-| `fiozl_ashift_disk` | `4k` | `4k` or `8k` (only `gozfs.sh`; `gozfs_512b.sh` ignores it). |
+| `fiozl_ashift_disk` | `4k` | Disk sector handling: `4k` (default), `8k`, or `512b` (native 512-byte sectors, no `gnop`). Option `-a`. |
 | `fiozl_ftphost` | 12.4-RC2 | Source URL for `base/lib32/kernel/MANIFEST` archives. |
 | `fiozl_distdir` | _empty_ | Local directory on MfsBSD with pre-fetched `*.txz`. |
 | `fiozl_hostname` | `core.domain.com` | Hostname for the new system. |
@@ -63,32 +61,32 @@ See the `defaults/main.yml` and examples in vars.
 | `fiozl_url_file_zfs_skeleton` | _empty_ | Same idea, fetched over HTTP into `/tmp/zfs_skeleton.sh` and executed, option `-Z`. |
 | `fiozl_gateway`, `fiozl_ip` | `auto` / _empty_ | Static network override (`fiozl_ip` accepts `addr/prefix`); otherwise DHCP. |
 
-#### New options (gozfs.sh ≥ 2.10)
+#### New options (gozfs.sh ≥ 2.20)
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `fiozl_boot_mode` | `auto` | `bios`, `uefi`, `hybrid` or `auto` (detect via `machdep.bootmethod` / `/sys/firmware/efi`). `uefi`/`hybrid` create an 800 MB EFI System Partition per disk and install `loader.efi` to both `EFI/BOOT/BOOTX64.efi` and `EFI/FreeBSD/loader.efi`. Option `-B`. |
 | `fiozl_install_debug` | `false` | When `true`, also unpacks `base-dbg.txz`, `lib32-dbg.txz`, `kernel-dbg.txz` (passes `-x` to the script). |
 | `fiozl_iface` | _empty_ | Network interface for the installed system. Auto-detected when empty, but **required** when `fiozl_ip` is a static address. Option `-i`. |
-| `fiozl_ip` | _empty_ | `''`/`DHCP` (DHCP), `auto` (reuse the live IP), or a static `addr/prefix` such as `10.0.0.101/24`. Option `-I`. |
+| `fiozl_ip` | _empty_ | `''`/`DHCP` (DHCP), `auto` (reuse the live IP), or a static `addr/prefix` such as `10.0.0.101/24`. Option `-I`. To force DHCP set `fiozl_gateway: 'DHCP'`. |
 | `fiozl_nameserver` | _empty_ | DNS servers for the target system, comma- or space-separated (e.g. `8.8.8.8,1.1.1.1`). Writes `/etc/resolv.conf` and `/etc/resolvconf.conf`. Option `-N`. |
 | `fiozl_encryption_mode` | `none` | `native` enables OpenZFS native encryption: extra dataset `<pool>/encrypted` is created with `encryption=aes-256-gcm`, `keyformat=passphrase`, `keylocation=prompt`. `zfskeys_enable="YES"` is added to `rc.conf` so the system prompts on boot. Option `-E`. |
 | `fiozl_encrypt_passphrase` | _empty_ | **Literal** passphrase. If non-empty and `fiozl_encryption_mode == 'native'`, the role uploads it (mode `0600`, `no_log`) to `/root/.zfs_passphrase` on the MfsBSD host and feeds it to the script via `-e`. Store it with `ansible-vault`. |
 | `fiozl_encrypt_passphrase_file` | _empty_ | Path **on the MfsBSD host** to a pre-placed passphrase file. Used as-is via `-e` when `fiozl_encrypt_passphrase` is empty. |
-| 512-byte-sector disks | _-_ | Set `fiozl_script_name: 'gozfs_512b.sh'` (the dedicated variant without the `gnop` wrapper). |
 
 The created pool always uses a Boot-Environment-aware layout: `<pool>/ROOT/default`
 is the active root and `bootfs`, ready for `bectl create`/`bectl activate`.
 
 ### Encryption: how it works
 
-When `fiozl_encryption_mode: native` is set, `gozfs.sh` (and `gozfs_512b.sh`):
+When `fiozl_encryption_mode: native` is set, `gozfs.sh`:
 
 1. obtains the passphrase from one of (in priority order):
    - `-e <file>` (set automatically by this role from `fiozl_encrypt_passphrase`,
      or directly from `fiozl_encrypt_passphrase_file`),
    - the `ZFS_ENCRYPT_PASSPHRASE` environment variable,
-   - an interactive `stty -echo` prompt (only useful when running the script by hand);
+   - an interactive `stty -echo` prompt (only useful when running the script by
+     hand — unattended runs without a passphrase fail fast instead of hanging);
 2. creates `<poolname>/encrypted` with `aes-256-gcm`, mounted at `/encrypted`;
 3. immediately switches the dataset to `keylocation=prompt` and removes the
    temporary keyfile, so no plaintext key stays on disk;
@@ -154,7 +152,7 @@ shell> cat install_freebsd_in_mfsbsd.yml
 - hosts: MfsBSD_server
   gather_facts: false
   vars:
-    fiozl_script_name: 'gozfs_512b.sh'
+    fiozl_ashift_disk: '512b'
     fiozl_provider:
       - 'ada0'
     fiozl_poolname: 'zroot'

@@ -1,11 +1,8 @@
 ---
 
-- name: Upload multiple files
-  with_items:
-    - 'gozfs.sh'
-    - 'gozfs_512b.sh'
+- name: Upload the installer script
   copy:
-    src: '{{ item }}'
+    src: 'gozfs.sh'
     dest: /root/
     mode: '0644'
     # (default) overwrite on source change
