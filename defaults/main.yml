@@ -1,6 +1,6 @@
 ---
 
-fiozl_script_name: 'gozfs.sh'  # 'gozfs.sh' (4k/8k) or 'gozfs_512b.sh' (512-byte sectors)
+fiozl_script_name: 'gozfs.sh'  # single installer script (handles 512b/4k/8k via -a)
 fiozl_end_suffix: completed
 fiozl_tmux_tab_name: 'Install_FreeBSD'
 
@@ -10,7 +10,7 @@ fiozl_provider:
 fiozl_swap_partition_size: '512M'
 fiozl_zfs_partition_size: ''  # full disk minus {{ fiozl_offset_end_disk }}
 fiozl_poolname: 'zroot'
-fiozl_ashift_disk: '' # default - '4k', or '8k' (only gozfs.sh; gozfs_512b.sh ignores it)
+fiozl_ashift_disk: '' # default - '4k'; '8k'; or '512b' (native 512-byte sectors, no gnop)
 fiozl_boot_mode: '' # default - 'auto' (auto-detect). Options: auto | bios | uefi | hybrid
 fiozl_install_debug: false # -x: also install debug sets (base-dbg, lib32-dbg, kernel-dbg)
 fiozl_hostname: '' # default - 'core.domain.com'
@@ -65,12 +65,12 @@ fiozl_script_options: '
  -i ''{{ fiozl_iface }}''
  -I ''{{ fiozl_ip }}''
  -N ''{{ fiozl_nameserver }}''
+ -a ''{{ fiozl_ashift_disk }}''
  -B ''{{ fiozl_boot_mode }}''
  -E ''{{ fiozl_encryption_mode }}''
  -t ''{{ fiozl_timezone }}''
  -z ''{{ fiozl_file_zfs_skeleton }}''
  -Z ''{{ fiozl_url_file_zfs_skeleton }}''
-{% if fiozl_script_name != "gozfs_512b.sh" %} -a ''{{ fiozl_ashift_disk }}''{% endif %}
 {% if fiozl_encrypt_passphrase | length > 0 %} -e ''/root/.zfs_passphrase''{% elif fiozl_encrypt_passphrase_file | length > 0 %} -e ''{{ fiozl_encrypt_passphrase_file }}''{% endif %}
 {% if fiozl_install_debug %} -x{% endif %}
 '

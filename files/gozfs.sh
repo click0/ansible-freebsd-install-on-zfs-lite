@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Current Version: 2.10
+# Current Version: 2.20
 
 # original script by Philipp Wuensche at http://anonsvn.h3q.com/s/gpt-zfsroot.sh
 # This script is considered beer ware (http://en.wikipedia.org/wiki/Beerware)
@@ -68,12 +68,16 @@ usage="Usage: $0 -p <geom_provider> -s <swap_partition_size> -S <zfs_partition_s
 [ -g <gateway> [-i <iface>] -I <IP_address/mask> -N <dns1,dns2,...> ]
 
 boot_mode: auto (default), bios, uefi, hybrid
+ashift_disk: 512b, 4k (default), 8k
+  512b -- native 512-byte sectors: no gnop wrapper, no gpart alignment
+          override (replaces the former gozfs_512b.sh)
+  4k/8k -- advanced-format disks: gnop wrapper forces the pool ashift
 encryption_mode: none (default), native
   When 'native': creates an extra encrypted dataset <poolname>/encrypted
   with aes-256-gcm. Passphrase source (in priority order):
     -e <file>  --  read passphrase from file (recommended; avoids shell quoting)
     \$ZFS_ENCRYPT_PASSPHRASE env var
-    interactive prompt
+    interactive prompt (only when a tty is attached)
   Unlocked at boot via the zfskeys rc service.
 -x: also install debug distribution sets (base-dbg, lib32-dbg, kernel-dbg)
 -N: comma- or space-separated DNS servers for the target system"
@@ -137,7 +141,30 @@ fi
 [ -z "$memdisksize" ] && memdisksize=350M # deprecated
 [ -z "$password" ] && password="mfsroot123"
 [ -z "$hostname" ] && hostname="core.domain.com"
-[ -z "$ashift" ] && ashift="4k"		# 4k or 8k
+[ -z "$ashift" ] && ashift="4k"		# 512b, 4k or 8k
+# Map the requested ashift to per-mode behaviour. 512b reproduces the old
+# gozfs_512b.sh path (no gnop wrapper, no gpart alignment, min_auto_ashift=12).
+case "$ashift" in
+	512b)
+		gpart_align_arg=""
+		gnop_size=""
+		min_auto_ashift_val=12
+		nop_suffix=""
+		;;
+	4k)
+		gpart_align_arg="-a 4k"
+		gnop_size=4096
+		min_auto_ashift_val=13
+		nop_suffix=".nop"
+		;;
+	8k)
+		gpart_align_arg="-a 8k"
+		gnop_size=8192
+		min_auto_ashift_val=13
+		nop_suffix=".nop"
+		;;
+	*) exerr "Invalid ashift: $ashift. Use 512b, 4k, or 8k." ;;
+esac
 [ -z "$offset" ] && offset="2048"	# remainder at the end of the disc, 1 MB
 									# 1 MB approximately for every full and partial 1 TB of disk capacity.
 destdir=${destdir:-/mnt}
@@ -165,6 +192,12 @@ if [ "$encryption_mode" = "native" ]; then
 	elif [ -n "$ZFS_ENCRYPT_PASSPHRASE" ]; then
 		printf '%s' "$ZFS_ENCRYPT_PASSPHRASE" > "$encrypt_keyfile"
 	else
+		# No file, no env var: only a real terminal can supply it interactively.
+		# Refuse to block forever when run unattended (e.g. detached tmux/ansible).
+		if [ ! -t 0 ]; then
+			rm -f "$encrypt_keyfile"
+			exerr "encryption_mode=native but no passphrase: pass -e <file> or set \$ZFS_ENCRYPT_PASSPHRASE (no interactive tty)."
+		fi
 		printf 'Enter ZFS encryption passphrase (>=8 chars): ' >&2
 		stty -echo 2>/dev/null
 		IFS= read -r encrypt_passphrase
@@ -212,10 +245,19 @@ iface=${iface:-"$(ifconfig -l -u | sed -e 's/lo[0-9]*//' -e 's/enc[0-9]*//' -e '
 -e 's/stf[0-9]*//' -e 's/lagg[0-9]*//' -e 's/  / /g')"}
 iface=${iface:-"em0 em1 re0 igb0 vtnet0"}
 
-if [ "$gateway" = "auto" ] || [ "${ip_address}" = "auto" ]; then
+# DHCP takes priority: an explicit DHCP request wins over auto-detection.
+if [ "$gateway" = "DHCP" ] || [ "${ip_address}" = "DHCP" ]; then
+	gateway=''
+	ip_address=''
+elif [ "$gateway" = "auto" ] || [ "${ip_address}" = "auto" ]; then
 	gateway=$(netstat -rn4 | awk '/default/{print $2;}')
-	auto_ip=$(ifconfig | grep 'inet\b' | grep -v 127.0 | awk '{ print $2 }' | head -1)
-	auto_mask_hex=$(ifconfig | grep 'inet\b' | grep -v 127.0 | awk '{ print $4 }' | head -1)
+	# Prefer the interface that owns the default route, unless -i was given.
+	auto_iface=$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')
+	[ -z "$iface_cli" ] && [ -n "$auto_iface" ] && iface="$auto_iface"
+	auto_ip=$(ifconfig ${iface%% *} 2>/dev/null | awk '/inet /&&$2!~/^127\./{print $2; exit}')
+	auto_mask_hex=$(ifconfig ${iface%% *} 2>/dev/null | awk '/inet /&&$2!~/^127\./{print $4; exit}')
+	[ -z "$auto_ip" ] && auto_ip=$(ifconfig | awk '/inet /&&$2!~/^127\./{print $2; exit}')
+	[ -z "$auto_mask_hex" ] && auto_mask_hex=$(ifconfig | awk '/inet /&&$2!~/^127\./{print $4; exit}')
 	if [ -n "${auto_mask_hex}" ]; then
 		mask_int=$(printf '%d' "${auto_mask_hex}")
 		bits=0
@@ -228,9 +270,6 @@ if [ "$gateway" = "auto" ] || [ "${ip_address}" = "auto" ]; then
 		ip_address="${auto_ip}"
 	fi
 fi
-
-[ "$gateway" = "DHCP" ] && gateway=''
-[ "${ip_address}" = "DHCP" ] && ip_address=''
 
 if [ -n "$gateway" ] && [ -n "${ip_address}" ]; then
 	iface_manual=yes
@@ -374,7 +413,7 @@ if [ "$boot_mode" = "bios" ] || [ "$boot_mode" = "hybrid" ]; then
 	for disk in $provider; do
 		get_disk_labelname
 		echo " ->  ${disk}"
-		gpart add -s 1024 -t freebsd-boot -a $ashift -l boot-${counter} $disk >/dev/null
+		gpart add -s 1024 -t freebsd-boot ${gpart_align_arg} -l boot-${counter} $disk >/dev/null
 		counter=$((counter + 1))
 	done
 fi
@@ -386,7 +425,7 @@ if [ "$boot_mode" = "uefi" ] || [ "$boot_mode" = "hybrid" ]; then
 	for disk in $provider; do
 		get_disk_labelname
 		echo " ->  ${disk}"
-		gpart add -s ${esp_size} -t efi -a $ashift -l efi-${label} $disk >/dev/null
+		gpart add -s ${esp_size} -t efi ${gpart_align_arg} -l efi-${label} $disk >/dev/null
 		counter=$((counter + 1))
 	done
 fi
@@ -396,7 +435,7 @@ if [ "${swap_partition_size}" ] && [ "${swap_partition_size}" != "0" ]; then
 	for disk in $provider; do
 		get_disk_labelname
 		echo " ->  ${disk} (Label: ${label})"
-		gpart add -s "${swap_partition_size}" -t freebsd-swap -a $ashift -l swap-"${label}" ${disk} >/dev/null
+		gpart add -s "${swap_partition_size}" -t freebsd-swap ${gpart_align_arg} -l swap-"${label}" ${disk} >/dev/null
 		swapon /dev/gpt/swap-${label}
 	done
 fi
@@ -419,10 +458,10 @@ fi
 for disk in $provider; do
 	get_disk_labelname
 	echo " ->  ${disk} (Label: ${label})"
-	gpart add -t freebsd-zfs ${size_string} -a $ashift -l system-${label} ${disk} >/dev/null
+	gpart add -t freebsd-zfs ${size_string} ${gpart_align_arg} -l system-${label} ${disk} >/dev/null
 
 	counter=$((counter + 1))
-	labellist="${labellist} gpt/system-${label}.nop"
+	labellist="${labellist} gpt/system-${label}${nop_suffix}"
 	if [ "$((counter % 2))" -eq "0" ] && [ "$devcount" -ne "$counter" ] && [ "$mode" = "raid10" ]; then
 		labellist="${labellist} mirror "
 	fi
@@ -436,24 +475,24 @@ ls -l /dev/gpt/
 
 if ! /sbin/kldstat -m zfs >/dev/null 2>&1; then
 	/sbin/kldload zfs >/dev/null 2>&1
-	sysctl vfs.zfs.min_auto_ashift=13 # need module zfs
+	sysctl vfs.zfs.min_auto_ashift=${min_auto_ashift_val} # need module zfs
 fi
-if ! /sbin/kldstat -m g_nop >/dev/null 2>&1; then
+if [ -n "${gnop_size}" ] && ! /sbin/kldstat -m g_nop >/dev/null 2>&1; then
 	/sbin/kldload geom_nop.ko >/dev/null 2>&1
 fi
 
 # we need to create /boot/zfs so zpool.cache can be written.
 [ ! -d /boot/zfs ] && mkdir /boot/zfs
 
-# create gnop
-[ "$ashift" = "4k" ] && gnop_ashift=4096
-[ "$ashift" = "8k" ] && gnop_ashift=8192
-for disk in $provider; do
-	get_disk_labelname
-	gnop create -S ${gnop_ashift} /dev/gpt/system-${label} >/dev/null
-done
-# Show gnop output
-gnop list
+# create gnop wrapper to force ashift on disks that report 512-byte sectors
+if [ -n "${gnop_size}" ]; then
+	for disk in $provider; do
+		get_disk_labelname
+		gnop create -S ${gnop_size} /dev/gpt/system-${label} >/dev/null
+	done
+	# Show gnop output
+	gnop list
+fi
 
 zpool_option="-o altroot=$destdir -o cachefile=/tmp/zpool.cache"
 # Create the pool and the rootfs
@@ -478,11 +517,13 @@ fi
 
 zpool export $poolname
 
-# destroy gnop
-for disk in $provider; do
-	get_disk_labelname
-	gnop destroy /dev/gpt/system-${label}.nop >/dev/null
-done
+# destroy gnop (only created for 4k/8k)
+if [ -n "${gnop_size}" ]; then
+	for disk in $provider; do
+		get_disk_labelname
+		gnop destroy /dev/gpt/system-${label}.nop >/dev/null
+	done
+fi
 ls -l /dev/gpt/
 sleep 3
 zpool import ${zpool_option} $poolname
@@ -784,7 +825,7 @@ echo "$password" | pw -V "$destdir/etc" usermod root -h 0 \
 # unmount devfs from outside chroot
 umount "$destdir/dev" || echo "WARN: could not unmount $destdir/dev"
 
-# create Ansible completion marker inside target system
+# create Ansible completion marker inside target system (survives reboot)
 marker_name=$(basename "$(test -L "$0" && readlink "$0" || echo "$0")").completed
 touch "$destdir/root/$marker_name"
 
@@ -800,3 +841,8 @@ echo
 echo "Please reboot the system from the harddisk(s), remove the FreeBSD media from you cdrom!"
 
 zpool export -f $poolname
+
+# Drop a completion marker on the live (installer) host as well: after the pool
+# is exported the in-target marker is no longer reachable, so an orchestrator
+# watching /root/<script>.completed needs this one to detect the finished run.
+touch "/root/$marker_name"
