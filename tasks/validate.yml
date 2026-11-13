@@ -1,0 +1,28 @@
+---
+
+- name: Check role variables before touching the host
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - fiozl_provider | length > 0
+      - fiozl_ashift_disk in ['', '512b', '4k', '8k']
+      - fiozl_boot_mode in ['', 'auto', 'bios', 'uefi', 'hybrid']
+      - fiozl_encryption_mode in ['', 'none', 'native']
+      # a static address needs an explicit interface (the script refuses otherwise)
+      - fiozl_ip in ['', 'auto', 'DHCP'] or fiozl_iface | length > 0
+    fail_msg: >-
+      Invalid role variables: check fiozl_provider, fiozl_ashift_disk,
+      fiozl_boot_mode, fiozl_encryption_mode; a static fiozl_ip also
+      requires fiozl_iface.
+
+- name: Native encryption needs a passphrase (the script would wait for input forever)
+  when: fiozl_encryption_mode == 'native'
+  ansible.builtin.assert:
+    quiet: true
+    that:
+      - >-
+        fiozl_encrypt_passphrase | length >= 8
+        or (fiozl_encrypt_passphrase | length == 0 and fiozl_encrypt_passphrase_file | length > 0)
+    fail_msg: >-
+      fiozl_encryption_mode is 'native': set fiozl_encrypt_passphrase
+      (at least 8 characters) or fiozl_encrypt_passphrase_file.

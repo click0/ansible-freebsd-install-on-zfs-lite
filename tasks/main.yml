@@ -1,12 +1,15 @@
 ---
+- name: Validate role variables
+  ansible.builtin.include_tasks: validate.yml
+
 - name: Install the minimum required software for further work.
-  include: 0-pre-install.yml
+  ansible.builtin.include_tasks: 0-pre-install.yml
 
 - name: Upload files
-  include: upload_files.yml
+  ansible.builtin.include_tasks: upload_files.yml
 
 - name: Install FreeBSD
-  include: install_freebsd.yml
+  ansible.builtin.include_tasks: install_freebsd.yml
 
 - name: Reboot the server
-  include: reboot.yml
+  ansible.builtin.include_tasks: reboot.yml

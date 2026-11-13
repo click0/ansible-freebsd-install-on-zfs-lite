@@ -1,12 +1,62 @@
 ---
 
-- name: Run script {{ fiozl_script_name }} in tmux
-  ansible.builtin.command: tmux new-session -d -s {{ fiozl_tmux_tab_name }} "sh {{ fiozl_script_name }} {{ fiozl_script_options }}; csh"
+- name: Remove leftovers of a previous run
+  ansible.builtin.file:
+    path: '/root/{{ fiozl_script_name }}.{{ item }}'
+    state: absent
+  loop:
+    - '{{ fiozl_end_suffix }}'
+    - exitcode
 
-- name: Wait until the file {{ fiozl_script_name }}.{{ fiozl_end_suffix }} is present before continuing
-  wait_for:
-    path: '/root/{{ fiozl_script_name }}.{{ fiozl_end_suffix }}'
+- name: Close a stale tmux session of a previous run
+  ansible.builtin.command:
+    argv: [tmux, kill-session, -t, '{{ fiozl_tmux_tab_name }}']
+  register: fiozl_tmux_kill
+  changed_when: fiozl_tmux_kill.rc == 0
+  failed_when: false
+
+- name: Run script {{ fiozl_script_name }} in tmux
+  ansible.builtin.command:
+    argv:
+      - tmux
+      - new-session
+      - -d
+      - -s
+      - '{{ fiozl_tmux_tab_name }}'
+      - 'sh /root/{{ fiozl_script_name }}.run; csh'
+  changed_when: true
+
+- name: Wait until the script {{ fiozl_script_name }} has finished
+  ansible.builtin.wait_for:
+    path: '/root/{{ fiozl_script_name }}.exitcode'
     state: present
     delay: 10
-    timeout: 3600
-    msg: Timeout to find file {{ fiozl_script_name }}.{{ fiozl_end_suffix }}
+    timeout: '{{ fiozl_install_timeout | int }}'
+    msg: >-
+      {{ fiozl_script_name }} did not finish in {{ fiozl_install_timeout }}s;
+      inspect it on the host: tmux attach -t {{ fiozl_tmux_tab_name }}
+
+- name: Remove the runner (it contains the root password)
+  ansible.builtin.file:
+    path: '/root/{{ fiozl_script_name }}.run'
+    state: absent
+
+- name: Check the completion marker {{ fiozl_script_name }}.{{ fiozl_end_suffix }}
+  ansible.builtin.stat:
+    path: '/root/{{ fiozl_script_name }}.{{ fiozl_end_suffix }}'
+  register: fiozl_marker
+
+- name: Collect the tail of the installer output
+  when: not fiozl_marker.stat.exists
+  ansible.builtin.command:
+    argv: [tmux, capture-pane, -p, -S, '-40', -t, '{{ fiozl_tmux_tab_name }}']
+  register: fiozl_tmux_log
+  changed_when: false
+  failed_when: false
+
+- name: Stop when the installation failed
+  when: not fiozl_marker.stat.exists
+  ansible.builtin.fail:
+    msg:
+      - '{{ fiozl_script_name }} failed; details: tmux attach -t {{ fiozl_tmux_tab_name }}'
+      - '{{ fiozl_tmux_log.stdout_lines | default([]) | select | list }}'

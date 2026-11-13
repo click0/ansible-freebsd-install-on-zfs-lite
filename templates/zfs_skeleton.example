@@ -1,6 +1,6 @@
 # Custom dataset skeleton, sourced from gozfs.sh after $poolname/ROOT/default
 # is created and bootfs is set. Override only if you do NOT want the default
-# Boot-Environment-aware layout produced by gozfs.sh >= 1.60.
+# Boot-Environment-aware layout produced by gozfs.sh.
 #
 # Available shell variables: $poolname, $destdir
 #
