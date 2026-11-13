@@ -1,24 +1,28 @@
 ---
 
-- name: run pkg install python2 via raw module
-  raw: '{{ item }}'
-  loop:
-    - env ASSUME_ALWAYS_YES=yes pkg-static bootstrap -f
-    - pkg-static install -yf pkg
-    - env IGNORE_OSVERSION=yes pkg update -f
-    - pkg install -y python2 bash-static
-  ignore_errors: true
+# No python on a fresh MfsBSD: bootstrap it with the raw module.
+# The login shell is csh, hence the explicit sh -c.
+- name: Install python3 via raw module (skipped when already present)
+  ansible.builtin.raw: >-
+    sh -c 'if command -v python3 >/dev/null 2>&1; then echo PYTHON_PRESENT; exit 0; fi;
+    env ASSUME_ALWAYS_YES=yes pkg-static bootstrap -f;
+    pkg-static install -yf pkg;
+    env IGNORE_OSVERSION=yes pkg update -f;
+    pkg install -y bash-static;
+    pkg install -y python3'
+  register: fiozl_python_bootstrap
+  changed_when: "'PYTHON_PRESENT' not in fiozl_python_bootstrap.stdout"
 
 - name: Add tmux option
 # https://www.hamvocke.com/blog/a-guide-to-customizing-your-tmux-conf/
-  lineinfile:
+  ansible.builtin.blockinfile:
     path: /root/.tmux.conf
-    line: |
+    block: |
       set-option -g history-limit 300000
       unbind C-b
       set-option -g prefix C-a
       bind-key C-a send-prefix
       set-option -g mouse on
     state: present
-    mode: 0644
+    mode: '0644'
     create: true

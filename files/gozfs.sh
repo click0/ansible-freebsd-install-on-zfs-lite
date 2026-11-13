@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Current Version: 2.20
+# Current Version: 2.21
 
 # original script by Philipp Wuensche at http://anonsvn.h3q.com/s/gpt-zfsroot.sh
 # This script is considered beer ware (http://en.wikipedia.org/wiki/Beerware)
@@ -78,7 +78,8 @@ encryption_mode: none (default), native
     -e <file>  --  read passphrase from file (recommended; avoids shell quoting)
     \$ZFS_ENCRYPT_PASSPHRASE env var
     interactive prompt (only when a tty is attached)
-  Unlocked at boot via the zfskeys rc service.
+  keylocation=prompt: unlock after boot with 'zfs load-key -a && zfs mount -a'
+  (prompted at boot only where rc.d/zfskeys supports zfskeys_prompt_enable).
 -x: also install debug distribution sets (base-dbg, lib32-dbg, kernel-dbg)
 -N: comma- or space-separated DNS servers for the target system"
 
@@ -240,9 +241,9 @@ esac
 echo "Boot mode: $boot_mode"
 
 # autodetect physical network interfaces
-iface=${iface:-"$(ifconfig -l -u | sed -e 's/lo[0-9]*//' -e 's/enc[0-9]*//' -e 's/gif[0-9]*//' \
--e 's/fwe[0-9]*//' -e 's/fwip[0-9]*//' -e 's/ipfw[0-9]*//' -e 's/pflog[0-9]*//' -e 's/plip[0-9]*//' \
--e 's/stf[0-9]*//' -e 's/lagg[0-9]*//' -e 's/  / /g')"}
+iface=${iface:-"$(ifconfig -l -u | sed -e 's/lo[0-9]*//g' -e 's/enc[0-9]*//g' -e 's/gif[0-9]*//g' \
+-e 's/fwe[0-9]*//g' -e 's/fwip[0-9]*//g' -e 's/ipfw[0-9]*//g' -e 's/pflog[0-9]*//g' -e 's/plip[0-9]*//g' \
+-e 's/stf[0-9]*//g' -e 's/lagg[0-9]*//g' -e 's/  / /g')"}
 iface=${iface:-"em0 em1 re0 igb0 vtnet0"}
 
 # DHCP takes priority: an explicit DHCP request wins over auto-detection.
@@ -291,7 +292,11 @@ if [ -n "$distdir" ]; then
 	fi
 fi
 
-if [ "$memdisksize" != "0" ] && [ -n "$distdir" ]; then
+# A memory disk is only useful for an EMPTY distdir; never mount it over
+# pre-fetched archives (that would hide them and produce an empty system).
+distdir_has_sets=no
+[ -n "$distdir" ] && ls "$distdir"/*.txz >/dev/null 2>&1 && distdir_has_sets=yes
+if [ "$memdisksize" != "0" ] && [ -n "$distdir" ] && [ "$distdir_has_sets" = "no" ]; then
 	if [ -e "/dev/md$memdisknumber" ]; then
 		umount /dev/md$memdisknumber
 		mdconfig -d -u $memdisknumber
@@ -360,9 +365,9 @@ get_disk_labelname() {
 }
 
 # stop swapping
-if swapinfo >/dev/null 2>/dev/null; then
-	swapoff "$(swapinfo | tail -n 1 | awk '{print$1}')"
-fi
+for swapdev in $(swapinfo 2>/dev/null | awk 'NR>1 && $1 ~ /^\//{print $1}'); do
+	swapoff "$swapdev"
+done
 
 echo "Creating GPT label on disks:"
 for disk in $provider; do
@@ -630,7 +635,8 @@ for file in ${filelist}; do
 	if [ "x$distdir" = "x" ]; then
 		(fetch --retry -o - "$ftphost/$file.txz" | tar --unlink -xpJf -) || exit
 	else
-		[ -e "$distdir/$file.txz" ] && tar --unlink -xpJf "$distdir/$file.txz"
+		[ -e "$distdir/$file.txz" ] || exerr "Distribution set not found: $distdir/$file.txz"
+		tar --unlink -xpJf "$distdir/$file.txz" || exit
 	fi
 done
 for file in ${filelist_optional}; do
@@ -657,9 +663,12 @@ sshd_flags="-oPort=22 -oCompression=yes -oPermitRootLogin=yes -oPasswordAuthenti
 dumpdev="AUTO"
 EOF
 
-# enable on-boot ZFS key prompt for encrypted datasets
+# Encrypted dataset uses keylocation=prompt. rc.d/zfskeys asks for the key at
+# boot only on releases that know zfskeys_prompt_enable; elsewhere unlock it
+# manually after boot: zfs load-key -a && zfs mount -a
 if [ "$encryption_mode" = "native" ]; then
 	echo 'zfskeys_enable="YES"' >>$destdir/etc/rc.conf
+	echo 'zfskeys_prompt_enable="YES"' >>$destdir/etc/rc.conf
 fi
 
 # apply DNS settings to target
@@ -673,6 +682,10 @@ EOF
 	for ns in $ns_list; do
 		echo "nameserver $ns" >>"$destdir/etc/resolv.conf"
 	done
+elif [ "${iface_manual}" = "yes" ] && [ -s /etc/resolv.conf ]; then
+	# Static network without -N: no DHCP will ever write resolv.conf on the
+	# target, so inherit the resolvers of the running installer.
+	grep '^nameserver' /etc/resolv.conf >"$destdir/etc/resolv.conf"
 fi
 
 if [ "${iface_manual}" = "1" ] || [ "${iface_manual}" = "yes" ] || [ "${iface_manual}" = "YES" ]; then

@@ -14,9 +14,9 @@ fiozl_ashift_disk: '' # default - '4k'; '8k'; or '512b' (native 512-byte sectors
 fiozl_boot_mode: '' # default - 'auto' (auto-detect). Options: auto | bios | uefi | hybrid
 fiozl_install_debug: false # -x: also install debug sets (base-dbg, lib32-dbg, kernel-dbg)
 fiozl_hostname: '' # default - 'core.domain.com'
-fiozl_ftphost: 'http://ftp.freebsd.org/pub/FreeBSD/releases/amd64/12.4-RC2/' # url_dir (12.3)
+fiozl_ftphost: 'http://ftp.freebsd.org/pub/FreeBSD/releases/amd64/14.4-RELEASE/' # url_dir with base.txz, kernel.txz, ...
 fiozl_mode: '' # Single disk - stripe
-fiozl_distdir: ''
+fiozl_distdir: '' # dir on the MfsBSD host with pre-fetched *.txz (then nothing is downloaded)
 fiozl_destdir: '' # default - '/mnt'
 fiozl_timezone: '' # default - 'Europe/Kyiv'
 fiozl_memdisksize: '' # default - '350' MB # deprecated
@@ -24,18 +24,20 @@ fiozl_offset_end_disk: '' # default - '2048' sectors (~1 MB)
 fiozl_iface: '' # autodetected when empty; REQUIRED when fiozl_ip is a static address
 fiozl_ip: '' # '' / 'DHCP' / 'auto' / '10.0.0.101/24'
 fiozl_nameserver: '' # -N: DNS servers for target system, comma/space separated, e.g. '8.8.8.8,1.1.1.1'
-fiozl_url_ssh_key_file:
-  - '' # url of a single ssh key file
-fiozl_url_ssh_key_dir:
-  - '' #  ${url_ssh_key_dir}/key[1..9].pub
+# Lists of mirrors: the first reachable URL is used.
+fiozl_url_ssh_key_file: [] # urls of an authorized_keys-style file
+fiozl_url_ssh_key_dir: [] # urls of a directory with key1.pub .. key9.pub
 fiozl_file_zfs_skeleton: '' # path to a local zfs skeleton file inside the installer
 fiozl_url_file_zfs_skeleton: '' # URL fetched to /tmp/zfs_skeleton.sh and executed
 fiozl_password: ''  # default mfsroot123
-fiozl_gateway: 'auto' # or IP or DHCP
-fiozl_reboot_timeout: '300' # seconds
+fiozl_gateway: 'auto' # 'auto' (keep the live IP/gateway as static config), an IP, or 'DHCP'
+fiozl_install_timeout: 3600 # seconds to wait for the installer script
+fiozl_reboot_timeout: '300' # seconds to wait for sshd of the installed system
+fiozl_reboot_wait: true # wait (from the controller) for port 22 after reboot
+fiozl_reboot_wait_host: '' # default - static fiozl_ip, else ansible_host
 
 # ZFS native encryption (optional). Creates an extra dataset <pool>/encrypted
-# (aes-256-gcm), unlocked at boot via the zfskeys rc service.
+# (aes-256-gcm, keylocation=prompt). Unlock after boot: zfs load-key -a && zfs mount -a
 fiozl_encryption_mode: '' # '' / 'none' (default), or 'native'
 # Literal passphrase. When set (and mode is native) the role uploads it to the
 # host (mode 0600) and feeds it to the script via -e. Use ansible-vault!
@@ -44,33 +46,32 @@ fiozl_encrypt_passphrase: ''
 # fiozl_encrypt_passphrase is empty.
 fiozl_encrypt_passphrase_file: ''
 
-# yaml syntax:
-# https://yaml-multiline.info/
-fiozl_script_options: '
- -p ''{{ fiozl_provider | join("'' -p ''") }}''
- -s ''{{ fiozl_swap_partition_size }}''
- -S ''{{ fiozl_zfs_partition_size }}''
- -n ''{{ fiozl_poolname }}''
- -m ''{{ fiozl_mode }}''
- -d ''{{ fiozl_distdir }}''
- -f ''{{ fiozl_ftphost }}''
- -M ''{{ fiozl_memdisksize }}''
- -P ''{{ fiozl_password }}''
- -h ''{{ fiozl_hostname }}''
- -o ''{{ fiozl_offset_end_disk }}''
- -k ''{{ fiozl_url_ssh_key_file }}''
- -K ''{{ fiozl_url_ssh_key_dir }}''
- -D ''{{ fiozl_destdir }}''
- -g ''{{ fiozl_gateway }}''
- -i ''{{ fiozl_iface }}''
- -I ''{{ fiozl_ip }}''
- -N ''{{ fiozl_nameserver }}''
- -a ''{{ fiozl_ashift_disk }}''
- -B ''{{ fiozl_boot_mode }}''
- -E ''{{ fiozl_encryption_mode }}''
- -t ''{{ fiozl_timezone }}''
- -z ''{{ fiozl_file_zfs_skeleton }}''
- -Z ''{{ fiozl_url_file_zfs_skeleton }}''
-{% if fiozl_encrypt_passphrase | length > 0 %} -e ''/root/.zfs_passphrase''{% elif fiozl_encrypt_passphrase_file | length > 0 %} -e ''{{ fiozl_encrypt_passphrase_file }}''{% endif %}
-{% if fiozl_install_debug %} -x{% endif %}
-'
+# Every value is shell-quoted; the role writes the command line into a 0700
+# runner file on the host, so quotes/spaces in values (e.g. password) are safe.
+fiozl_script_options: >-
+  {% for item in fiozl_provider %} -p {{ item | string | quote }}{% endfor %}
+  -s {{ fiozl_swap_partition_size | string | quote }}
+  -S {{ fiozl_zfs_partition_size | string | quote }}
+  -n {{ fiozl_poolname | string | quote }}
+  -m {{ fiozl_mode | string | quote }}
+  -d {{ fiozl_distdir | string | quote }}
+  -f {{ fiozl_ftphost | string | quote }}
+  -M {{ fiozl_memdisksize | string | quote }}
+  -P {{ fiozl_password | string | quote }}
+  -h {{ fiozl_hostname | string | quote }}
+  -o {{ fiozl_offset_end_disk | string | quote }}
+  {% for item in ([fiozl_url_ssh_key_file] if fiozl_url_ssh_key_file is string else fiozl_url_ssh_key_file) if item %} -k {{ item | string | quote }}{% endfor %}
+  {% for item in ([fiozl_url_ssh_key_dir] if fiozl_url_ssh_key_dir is string else fiozl_url_ssh_key_dir) if item %} -K {{ item | string | quote }}{% endfor %}
+  -D {{ fiozl_destdir | string | quote }}
+  -g {{ fiozl_gateway | string | quote }}
+  -i {{ fiozl_iface | string | quote }}
+  -I {{ fiozl_ip | string | quote }}
+  -N {{ fiozl_nameserver | string | quote }}
+  -a {{ fiozl_ashift_disk | string | quote }}
+  -B {{ fiozl_boot_mode | string | quote }}
+  -E {{ fiozl_encryption_mode | string | quote }}
+  -t {{ fiozl_timezone | string | quote }}
+  -z {{ fiozl_file_zfs_skeleton | string | quote }}
+  -Z {{ fiozl_url_file_zfs_skeleton | string | quote }}
+  {% if fiozl_encryption_mode == 'native' %}{% if fiozl_encrypt_passphrase | length > 0 %} -e /root/.zfs_passphrase{% elif fiozl_encrypt_passphrase_file | length > 0 %} -e {{ fiozl_encrypt_passphrase_file | string | quote }}{% endif %}{% endif %}
+  {% if fiozl_install_debug | bool %} -x{% endif %}

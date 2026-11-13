@@ -1,6 +1,9 @@
 ---
-- hosts: localhost
+# WARNING: the role wipes the disks listed in fiozl_provider.
+# Run it only against a host booted into MfsBSD.
+- hosts: MfsBSD_server
   remote_user: root
+  gather_facts: false
   roles:
-    - click0.freebsd_install_on_zfs
+    - click0.freebsd_install_on_zfs_lite
 ...

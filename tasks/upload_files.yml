@@ -1,8 +1,8 @@
 ---
 
 - name: Upload the installer script
-  copy:
-    src: 'gozfs.sh'
+  ansible.builtin.copy:
+    src: '{{ fiozl_script_name }}'
     dest: /root/
     mode: '0644'
     # (default) overwrite on source change
@@ -12,7 +12,21 @@
     - fiozl_encryption_mode == 'native'
     - fiozl_encrypt_passphrase | length > 0
   no_log: true
-  copy:
+  ansible.builtin.copy:
     content: '{{ fiozl_encrypt_passphrase }}'
     dest: /root/.zfs_passphrase
     mode: '0600'
+
+# The command line (it carries the root password) lives in a root-only file
+# instead of the tmux/Ansible command, and the exit code is recorded so a
+# failed run is noticed at once.
+- name: Upload the runner with the installer command line
+  no_log: true
+  ansible.builtin.copy:
+    content: |
+      #!/bin/sh
+      cd /root || exit 1
+      sh /root/{{ fiozl_script_name }} {{ fiozl_script_options }}
+      echo "$?" >/root/{{ fiozl_script_name }}.exitcode
+    dest: '/root/{{ fiozl_script_name }}.run'
+    mode: '0700'

@@ -1,5 +1,22 @@
 ---
 
-- name: Reboot the server
-  reboot:
-    reboot_timeout: '{{ fiozl_reboot_timeout }}'
+# The installed system has new host keys, another root password and no python,
+# so the reboot module cannot reconnect to it. Reboot detached and only wait
+# for sshd from the controller.
+- name: Reboot the server into the installed system
+  ansible.builtin.command: daemon -f sh -c 'sleep 3; reboot'
+  changed_when: true
+
+- name: Wait for sshd of the installed system
+  when: fiozl_reboot_wait | bool
+  delegate_to: localhost
+  become: false
+  ansible.builtin.wait_for:
+    host: >-
+      {{ fiozl_reboot_wait_host
+         or (fiozl_ip.split('/')[0] if fiozl_ip not in ['', 'auto', 'DHCP'] else '')
+         or ansible_host | default(inventory_hostname) }}
+    port: 22
+    search_regex: OpenSSH
+    delay: 30
+    timeout: '{{ fiozl_reboot_timeout | int }}'
