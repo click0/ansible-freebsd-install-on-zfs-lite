@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Current Version: 2.22
+# Current Version: 2.23
 
 # original script by Philipp Wuensche at http://anonsvn.h3q.com/s/gpt-zfsroot.sh
 # This script is considered beer ware (http://en.wikipedia.org/wiki/Beerware)
@@ -327,6 +327,12 @@ echo $mode
 sleep 1
 
 # check the settings for the users that want to set the mode on their own
+# (before any disk is touched: an unknown mode used to be noticed only after
+# the disks had been wiped and repartitioned)
+case "$mode" in
+	stripe | mirror | raidz | raid10) ;;
+	*) exerr "Invalid zpool mode: $mode. Use stripe, mirror, raidz or raid10." ;;
+esac
 if [ "$devcount" -eq "1" ] && [ "$mode" = "mirror" ]; then
 	echo "A mirror needs at least two disks!"
 	exit 1
@@ -398,6 +404,18 @@ for disk in $provider; do
 	gpart destroy -F $disk >/dev/null 2>&1
 	gpart create -s gpt $disk >/dev/null
 done
+
+# The target disks are clean now, so a pool with our name that is still visible
+# lives on a disk outside of this install. It makes "zpool import $poolname"
+# ambiguous ("more than one matching pool") and the new system could mount the
+# wrong root, so stop before anything is created.
+if zpool list -H -o name 2>/dev/null | grep -qx "$poolname"; then
+	exerr "A pool named '$poolname' is already imported. Export or destroy it, or choose another name with -n."
+fi
+if zpool import 2>/dev/null | awk -v p="$poolname" '$1 == "pool:" && $2 == p { found = 1 } END { exit !found }'; then
+	zpool import 2>/dev/null
+	exerr "A pool named '$poolname' exists on a disk that is not part of this install (see above).\nClear it (zpool labelclear -f <partition>), add the disk with -p, or choose another name with -n."
+fi
 
 smallest_disk_size='0'
 echo "Checking disks for size:"
@@ -543,7 +561,7 @@ if [ -n "${gnop_size}" ]; then
 fi
 ls -l /dev/gpt/
 sleep 3
-zpool import ${zpool_option} $poolname
+zpool import ${zpool_option} $poolname || exerr "Could not import pool $poolname"
 zpool status
 gpart show
 
@@ -559,7 +577,7 @@ zfs set freebsd:boot-environment=1 $poolname
 
 # Boot Environment container and default BE
 zfs create -o canmount=off -o mountpoint=none $poolname/ROOT
-zfs create -o mountpoint=/ $poolname/ROOT/default
+zfs create -o mountpoint=/ $poolname/ROOT/default || exerr "Could not create $poolname/ROOT/default"
 zpool set bootfs=$poolname/ROOT/default $poolname
 
 if [ -n "${url_file_zfs_skeleton}" ]; then
@@ -610,7 +628,11 @@ if [ "$encryption_mode" = "native" ]; then
 fi
 
 zpool export $poolname
-zpool import -f -d /dev/gpt/ -o altroot=$destdir -o cachefile=/tmp/zpool.cache $poolname
+zpool import -f -d /dev/gpt/ -o altroot=$destdir -o cachefile=/tmp/zpool.cache $poolname \
+	|| exerr "Could not import pool $poolname"
+# never unpack the system into the live (memory) filesystem
+[ "$(zfs get -H -o value mounted "$poolname/ROOT/default" 2>/dev/null)" = "yes" ] \
+	|| exerr "$poolname/ROOT/default is not mounted on $destdir"
 
 zfs list
 

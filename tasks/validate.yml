@@ -7,12 +7,17 @@
       - fiozl_provider | length > 0
       - fiozl_ashift_disk in ['', '512b', '4k', '8k']
       - fiozl_boot_mode in ['', 'auto', 'bios', 'uefi', 'hybrid']
+      - fiozl_mode in ['', 'stripe', 'mirror', 'raidz', 'raid10']
+      - fiozl_mode != 'mirror' or fiozl_provider | length >= 2
+      - fiozl_mode != 'raidz' or fiozl_provider | length >= 3
+      - fiozl_mode != 'raid10' or (fiozl_provider | length >= 4 and fiozl_provider | length % 2 == 0)
       - fiozl_encryption_mode in ['', 'none', 'native']
       # a static address needs an explicit interface (the script refuses otherwise)
       - fiozl_ip in ['', 'auto', 'DHCP'] or fiozl_iface | length > 0
     fail_msg: >-
       Invalid role variables: check fiozl_provider, fiozl_ashift_disk,
-      fiozl_boot_mode, fiozl_encryption_mode; a static fiozl_ip also
+      fiozl_boot_mode, fiozl_encryption_mode, fiozl_mode (mirror needs 2+
+      disks, raidz 3+, raid10 an even number of 4+); a static fiozl_ip also
       requires fiozl_iface.
 
 - name: Native encryption needs a passphrase (the script would wait for input forever)
