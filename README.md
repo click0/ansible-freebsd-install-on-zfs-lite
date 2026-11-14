@@ -13,7 +13,7 @@ This role acts as a runner for the single [`gozfs.sh` script](https://github.com
 (That's why there is `lite` in the role name too)  
 The role expects [MfsBSD](https://mfsbsd.vx.sk) as `standard` to be already running on the remote host (`mini` is an insufficient set of packages, `se` is oversized by the FreeBSD archives).  
 The role installs the `python3` package (when missing) and uploads `gozfs.sh` to the host.  
-The bundled script is **v2.22** and covers every sector size through the
+The bundled script is **v2.23** and covers every sector size through the
 `fiozl_ashift_disk` option (the former separate `gozfs_512b.sh` has been
 merged in):
 - `4k` (default) / `8k` — advanced-format disks. The ZFS partition is wrapped
@@ -48,8 +48,8 @@ See the `defaults/main.yml` and examples in vars.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `fiozl_provider` | `[ada0]` | List of GEOM providers to install onto. Each item may be `disk` or `disk=label`. |
-| `fiozl_poolname` | `zroot` | Name of the new zpool. |
-| `fiozl_mode` | _auto_ | `stripe`, `mirror`, `raidz`, `raid10` (auto-picked from disk count when empty). |
+| `fiozl_poolname` | `zroot` | Name of the new zpool. A pool with the same name on a disk that is **not** in `fiozl_provider` stops the install (the import would be ambiguous): clear it with `zpool labelclear`, add the disk, or pick another name. |
+| `fiozl_mode` | _auto_ | `stripe`, `mirror` (2+ disks), `raidz` (3+), `raid10` (even number, 4+). When empty: 1 disk - `stripe`, 4 disks - `raid10`, otherwise `mirror`. |
 | `fiozl_swap_partition_size` | `512M` | Size of the per-disk freebsd-swap partition (`0` to skip). |
 | `fiozl_zfs_partition_size` | _full disk_ | Size of the freebsd-zfs partition (accepts human sizes, e.g. `10G`). |
 | `fiozl_ashift_disk` | `4k` | Disk sector handling: `4k` (default), `8k`, or `512b` (native 512-byte sectors, no `gnop`). Option `-a`. |
