@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Current Version: 2.23
+# Current Version: 2.24
 
 # original script by Philipp Wuensche at http://anonsvn.h3q.com/s/gpt-zfsroot.sh
 # This script is considered beer ware (http://en.wikipedia.org/wiki/Beerware)
@@ -224,7 +224,12 @@ fi
 
 # auto-detect or validate boot mode
 detect_boot_mode() {
-	if sysctl -n machdep.bootmethod 2>/dev/null | grep -qi uefi; then
+	# MfsBSD started by GRUB (install_mfsbsd_iso.sh) on a UEFI machine reports
+	# machdep.bootmethod=BIOS, because GRUB does not pass the EFI system table
+	# to the kernel. That script leaves a hint in the kernel environment.
+	if kenv -q mfsbsd.bootmethod 2>/dev/null | grep -qi uefi; then
+		echo "uefi"
+	elif sysctl -n machdep.bootmethod 2>/dev/null | grep -qi uefi; then
 		echo "uefi"
 	elif [ -d /sys/firmware/efi ]; then
 		echo "uefi"

@@ -13,7 +13,7 @@ This role acts as a runner for the single [`gozfs.sh` script](https://github.com
 (That's why there is `lite` in the role name too)  
 The role expects [MfsBSD](https://mfsbsd.vx.sk) as `standard` to be already running on the remote host (`mini` is an insufficient set of packages, `se` is oversized by the FreeBSD archives).  
 The role installs the `python3` package (when missing) and uploads `gozfs.sh` to the host.  
-The bundled script is **v2.23** and covers every sector size through the
+The bundled script is **v2.24** and covers every sector size through the
 `fiozl_ashift_disk` option (the former separate `gozfs_512b.sh` has been
 merged in):
 - `4k` (default) / `8k` — advanced-format disks. The ZFS partition is wrapped
@@ -72,7 +72,7 @@ See the `defaults/main.yml` and examples in vars.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `fiozl_boot_mode` | `auto` | `bios`, `uefi`, `hybrid` or `auto` (detect via `machdep.bootmethod` / `/sys/firmware/efi`). `uefi`/`hybrid` create an 800 MB EFI System Partition per disk and install `loader.efi` to both `EFI/BOOT/BOOTX64.efi` and `EFI/FreeBSD/loader.efi`. Option `-B`. |
+| `fiozl_boot_mode` | `auto` | `bios`, `uefi`, `hybrid` or `auto` (detect via `machdep.bootmethod` / `/sys/firmware/efi`; the hint `mfsbsd.bootmethod` left by `install_mfsbsd_iso.sh` 1.31+ wins, because MfsBSD started from GRUB on a UEFI machine reports `BIOS`). `uefi`/`hybrid` create an 800 MB EFI System Partition per disk and install `loader.efi` to both `EFI/BOOT/BOOTX64.efi` and `EFI/FreeBSD/loader.efi`. Option `-B`. |
 | `fiozl_install_debug` | `false` | When `true`, also unpacks `base-dbg.txz`, `lib32-dbg.txz`, `kernel-dbg.txz` (passes `-x` to the script). |
 | `fiozl_iface` | _empty_ | Network interface for the installed system. Auto-detected when empty, but **required** when `fiozl_ip` is a static address. Option `-i`. |
 | `fiozl_ip` | _empty_ | `''`/`DHCP` (DHCP), `auto` (reuse the live IP), or a static `addr/prefix` such as `10.0.0.101/24`. Option `-I`. To force DHCP set `fiozl_gateway: 'DHCP'`. |
