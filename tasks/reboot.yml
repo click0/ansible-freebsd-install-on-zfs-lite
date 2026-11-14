@@ -16,7 +16,12 @@
       {{ fiozl_reboot_wait_host
          or (fiozl_ip.split('/')[0] if fiozl_ip not in ['', 'auto', 'DHCP'] else '')
          or ansible_host | default(inventory_hostname) }}
-    port: 22
+    # sshd of the installed system listens on 22; when the host is reached
+    # through a forwarded port (ansible_port), wait on that port instead.
+    port: >-
+      {{ (fiozl_reboot_wait_port
+          or (22 if (fiozl_reboot_wait_host or fiozl_ip not in ['', 'auto', 'DHCP'])
+              else (ansible_port | default(22)))) | int }}
     search_regex: OpenSSH
     delay: 30
     timeout: '{{ fiozl_reboot_timeout | int }}'

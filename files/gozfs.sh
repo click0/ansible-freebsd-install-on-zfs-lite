@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Current Version: 2.21
+# Current Version: 2.22
 
 # original script by Philipp Wuensche at http://anonsvn.h3q.com/s/gpt-zfsroot.sh
 # This script is considered beer ware (http://en.wikipedia.org/wiki/Beerware)
@@ -71,7 +71,9 @@ boot_mode: auto (default), bios, uefi, hybrid
 ashift_disk: 512b, 4k (default), 8k
   512b -- native 512-byte sectors: no gnop wrapper, no gpart alignment
           override (replaces the former gozfs_512b.sh)
-  4k/8k -- advanced-format disks: gnop wrapper forces the pool ashift
+  4k   -- pool ashift=12 (gnop wrapper + vfs.zfs.min_auto_ashift=12)
+  8k   -- pool ashift=13 (vfs.zfs.min_auto_ashift=13, no gnop: OpenZFS 2.x
+          cannot label a provider with 8K sectors)
 encryption_mode: none (default), native
   When 'native': creates an extra encrypted dataset <poolname>/encrypted
   with aes-256-gcm. Passphrase source (in priority order):
@@ -144,25 +146,27 @@ fi
 [ -z "$hostname" ] && hostname="core.domain.com"
 [ -z "$ashift" ] && ashift="4k"		# 512b, 4k or 8k
 # Map the requested ashift to per-mode behaviour. 512b reproduces the old
-# gozfs_512b.sh path (no gnop wrapper, no gpart alignment, min_auto_ashift=12).
+# gozfs_512b.sh path (no gnop wrapper, no gpart alignment, ashift left to ZFS).
+# 8k uses only the sysctl: "zpool create" of OpenZFS 2.x writes 4K blocks and
+# fails with EINVAL on a gnop provider with 8K sectors.
 case "$ashift" in
 	512b)
 		gpart_align_arg=""
 		gnop_size=""
-		min_auto_ashift_val=12
+		min_auto_ashift_val=9
 		nop_suffix=""
 		;;
 	4k)
 		gpart_align_arg="-a 4k"
 		gnop_size=4096
-		min_auto_ashift_val=13
+		min_auto_ashift_val=12
 		nop_suffix=".nop"
 		;;
 	8k)
 		gpart_align_arg="-a 8k"
-		gnop_size=8192
+		gnop_size=""
 		min_auto_ashift_val=13
-		nop_suffix=".nop"
+		nop_suffix=""
 		;;
 	*) exerr "Invalid ashift: $ashift. Use 512b, 4k, or 8k." ;;
 esac
@@ -379,15 +383,19 @@ for disk in $provider; do
 	echo " -> $disk"
 	# against PR 196102
 	# todo need to do tests
-	gpart recover /dev/$disk
-	if (gpart show /dev/$disk | grep -E -v '=>| - free -|^$'); then
+	gpart recover /dev/$disk 2>/dev/null
+	if (gpart show /dev/$disk 2>/dev/null | grep -E -v '=>| - free -|^$'); then
 		disk_index_list="$(gpart show /dev/$disk | grep -E -v '=>| - free -|^$' | awk '{print $3;}' | sort -r)"
 		for disk_index in ${disk_index_list}; do
+			# wipe ZFS labels of an old pool: they outlive "gpart delete"
+			for part in "/dev/${disk}p${disk_index}" "/dev/${disk}s${disk_index}"; do
+				[ -e "$part" ] && zpool labelclear -f "$part" >/dev/null 2>&1
+			done
 			gpart delete -i ${disk_index} /dev/$disk || exit 1
 		done
 	fi
-	zpool labelclear -f $disk >/dev/null
-	gpart destroy -F $disk >/dev/null
+	zpool labelclear -f $disk >/dev/null 2>&1
+	gpart destroy -F $disk >/dev/null 2>&1
 	gpart create -s gpt $disk >/dev/null
 done
 
@@ -480,8 +488,10 @@ ls -l /dev/gpt/
 
 if ! /sbin/kldstat -m zfs >/dev/null 2>&1; then
 	/sbin/kldload zfs >/dev/null 2>&1
-	sysctl vfs.zfs.min_auto_ashift=${min_auto_ashift_val} # need module zfs
 fi
+# The module is usually loaded already (mfsbsd, or the "zpool labelclear"
+# above), so the sysctl must not depend on the kldload.
+sysctl vfs.zfs.min_auto_ashift=${min_auto_ashift_val} # need module zfs
 if [ -n "${gnop_size}" ] && ! /sbin/kldstat -m g_nop >/dev/null 2>&1; then
 	/sbin/kldload geom_nop.ko >/dev/null 2>&1
 fi
@@ -493,6 +503,8 @@ fi
 if [ -n "${gnop_size}" ]; then
 	for disk in $provider; do
 		get_disk_labelname
+		# leftover of an interrupted run
+		[ -e "/dev/gpt/system-${label}.nop" ] && gnop destroy -f "/dev/gpt/system-${label}.nop"
 		gnop create -S ${gnop_size} /dev/gpt/system-${label} >/dev/null
 	done
 	# Show gnop output
@@ -724,31 +736,33 @@ cat $destdir/etc/rc.conf
 root_dir=$destdir/root/.ssh
 mkdir -p "${root_dir}" >/dev/null 2>&1
 chmod 700 ${root_dir}
+# Each option takes a list of mirrors: the first URL that yields a key wins.
+# The URL is fetched directly (no ping probe): ICMP is often filtered and a
+# host:port authority is not something ping understands.
 # ${ssh_key_dir}/key[1..9].pub
 if [ -n "${ssh_key_dir}" ]; then
 	for url in ${ssh_key_dir}; do
-		if (ping -q -c3 "$(echo "$url" | awk -F/ '{print $3;}')" >/dev/null 2>&1); then
-			for i in $(jot 9); do
-				fetch -qo - "$url/key$i.pub" >>"${root_dir}/authorized_keys"
-			done
-			chmod 600 "${root_dir}/authorized_keys"
-			break
-		else
-			echo "no ping to host $(echo "$url" | awk -F/ '{print $3;}')"
-		fi
+		got_key=no
+		for i in $(jot 9); do
+			fetch -T 10 -qo - "$url/key$i.pub" >>"${root_dir}/authorized_keys" 2>/dev/null && got_key=yes
+		done
+		[ "$got_key" = "yes" ] && break
+		echo "WARN: no ssh keys fetched from $url"
 	done
 fi
 
 if [ -n "${ssh_key_file}" ]; then
 	for ssh_key in ${ssh_key_file}; do
-		if (ping -q -c3 "$(echo "${ssh_key}" | awk -F/ '{print $3;}')" >/dev/null 2>&1); then
-			fetch -qo - "${ssh_key}" >>"${root_dir}/authorized_keys"
-			chmod 600 "${root_dir}/authorized_keys"
-			break
-		else
-			echo "no ping to host $(echo "${ssh_key}" | awk -F/ '{print $3;}')"
-		fi
+		fetch -T 10 -qo - "${ssh_key}" >>"${root_dir}/authorized_keys" && break
+		echo "WARN: cannot fetch ssh keys from ${ssh_key}"
 	done
+fi
+
+if [ -s "${root_dir}/authorized_keys" ]; then
+	chmod 600 "${root_dir}/authorized_keys"
+elif [ -n "${ssh_key_dir}${ssh_key_file}" ]; then
+	echo "WARN: no ssh keys were installed for root"
+	rm -f "${root_dir}/authorized_keys"
 fi
 
 cat <<EOF >>$destdir/boot/loader.conf
@@ -828,7 +842,9 @@ fi
 
 # hostname + mail aliases inside chroot
 env HOSTNAME_="$hostname" chroot "$destdir" /bin/sh -c \
-	'hostname "$HOSTNAME_"; make -C /etc/mail aliases' \
+	'hostname "$HOSTNAME_"
+	# dma (default MTA since 14.0) has no aliases database to rebuild
+	grep -q "^newaliases.*/dma" /etc/mail/mailer.conf 2>/dev/null || make -C /etc/mail aliases' \
 	|| echo "WARN: chroot setup (hostname/aliases) failed"
 
 # set root password on target
