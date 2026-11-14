@@ -13,7 +13,7 @@ This role acts as a runner for the single [`gozfs.sh` script](https://github.com
 (That's why there is `lite` in the role name too)  
 The role expects [MfsBSD](https://mfsbsd.vx.sk) as `standard` to be already running on the remote host (`mini` is an insufficient set of packages, `se` is oversized by the FreeBSD archives).  
 The role installs the `python3` package (when missing) and uploads `gozfs.sh` to the host.  
-The bundled script is **v2.21** and covers every sector size through the
+The bundled script is **v2.22** and covers every sector size through the
 `fiozl_ashift_disk` option (the former separate `gozfs_512b.sh` has been
 merged in):
 - `4k` (default) / `8k` — advanced-format disks. The ZFS partition is wrapped
@@ -58,14 +58,15 @@ See the `defaults/main.yml` and examples in vars.
 | `fiozl_hostname` | `core.domain.com` | Hostname for the new system. |
 | `fiozl_password` | `mfsroot123` | Initial root password on the installed system. Any characters are allowed; it is kept out of the Ansible log, but is visible in `ps` on the MfsBSD host while the script runs. |
 | `fiozl_timezone` | `Europe/Kyiv` | Timezone link for `/etc/localtime`. |
-| `fiozl_url_ssh_key_file` | `[]` | List of URLs of a plain `authorized_keys` file (mirrors: the first reachable one is used). |
-| `fiozl_url_ssh_key_dir` | `[]` | List of URLs of a directory with `key1.pub`..`key9.pub` (mirrors: the first reachable one is used). |
+| `fiozl_url_ssh_key_file` | `[]` | List of URLs of a plain `authorized_keys` file (mirrors: the first one that can be fetched is used). |
+| `fiozl_url_ssh_key_dir` | `[]` | List of URLs of a directory with `key1.pub`..`key9.pub` (mirrors: the first one that yields a key is used). |
 | `fiozl_file_zfs_skeleton` | _empty_ | Local skeleton script on the installer (see `templates/zfs_skeleton.example`), option `-z`. |
 | `fiozl_url_file_zfs_skeleton` | _empty_ | Same idea, fetched over HTTP into `/tmp/zfs_skeleton.sh` and executed, option `-Z`. |
 | `fiozl_gateway`, `fiozl_ip` | `auto` / _empty_ | Network of the installed system. The default `auto` keeps the live IP and gateway of the MfsBSD host as a **static** configuration (DNS servers are copied from MfsBSD unless `fiozl_nameserver` is set). Set `fiozl_gateway: 'DHCP'` for DHCP, or a gateway IP plus `fiozl_ip: addr/prefix` and `fiozl_iface`. |
 | `fiozl_install_timeout` | `3600` | Seconds to wait for the installer script. |
-| `fiozl_reboot_wait`, `fiozl_reboot_timeout` | `true` / `300` | Wait for port 22 of the installed system after the reboot. Disable when the host is not reachable directly from the controller (bastion). |
+| `fiozl_reboot_wait`, `fiozl_reboot_timeout` | `true` / `300` | Wait for the sshd banner after the reboot. Disable when the host is not reachable directly from the controller (bastion). The check cannot tell the installed system from the installer: if the machine boots MfsBSD again (CD/PXE/rescue still first in the boot order) the wait succeeds as well. |
 | `fiozl_reboot_wait_host` | _empty_ | Address to wait for; default is the static `fiozl_ip`, else `ansible_host`. |
+| `fiozl_reboot_wait_port` | _empty_ | Port to wait for; default is `22`, or `ansible_port` when the address is `ansible_host` (port forwarding). |
 
 #### New options (gozfs.sh ≥ 2.20)
 

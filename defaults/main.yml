@@ -24,7 +24,7 @@ fiozl_offset_end_disk: '' # default - '2048' sectors (~1 MB)
 fiozl_iface: '' # autodetected when empty; REQUIRED when fiozl_ip is a static address
 fiozl_ip: '' # '' / 'DHCP' / 'auto' / '10.0.0.101/24'
 fiozl_nameserver: '' # -N: DNS servers for target system, comma/space separated, e.g. '8.8.8.8,1.1.1.1'
-# Lists of mirrors: the first reachable URL is used.
+# Lists of mirrors: the first URL that can be fetched is used.
 fiozl_url_ssh_key_file: [] # urls of an authorized_keys-style file
 fiozl_url_ssh_key_dir: [] # urls of a directory with key1.pub .. key9.pub
 fiozl_file_zfs_skeleton: '' # path to a local zfs skeleton file inside the installer
@@ -35,6 +35,7 @@ fiozl_install_timeout: 3600 # seconds to wait for the installer script
 fiozl_reboot_timeout: '300' # seconds to wait for sshd of the installed system
 fiozl_reboot_wait: true # wait (from the controller) for port 22 after reboot
 fiozl_reboot_wait_host: '' # default - static fiozl_ip, else ansible_host
+fiozl_reboot_wait_port: '' # default - 22; ansible_port when waiting on ansible_host
 
 # ZFS native encryption (optional). Creates an extra dataset <pool>/encrypted
 # (aes-256-gcm, keylocation=prompt). Unlock after boot: zfs load-key -a && zfs mount -a
