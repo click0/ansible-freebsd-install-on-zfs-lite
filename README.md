@@ -272,8 +272,7 @@ A playbook: two disks in a mirror, the network as MfsBSD has it. Facts cannot be
     - click0.freebsd_install_on_zfs_lite
 ```
 
-An inventory. MfsBSD is entered with a password (`mfsroot` unless it was changed), which needs `sshpass` on the control node.
-Its host key is generated at boot, hence the relaxed host key checking:
+An inventory:
 
 ```ini
 [MfsBSD_server]
@@ -282,11 +281,19 @@ Its host key is generated at boot, hence the relaxed host key checking:
 [MfsBSD_server:vars]
 ansible_user=root
 ansible_password=mfsroot
+executable = /usr/local/bin/bash
+ansible_shell_type = csh
+ansible_python_interpreter=/usr/local/bin/python3
 ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
-# ansible_python_interpreter=/usr/local/bin/python3
 # behind a bastion:
 # ansible_ssh_common_args='-o ProxyCommand="ssh -W %h:%p -q my-bastion-host"'
 ```
+
+- **Password.** MfsBSD is entered with a password (`mfsroot` unless it was changed), which needs `sshpass` on the control node.
+- **Shell.** The login shell of root in MfsBSD is `csh`. `ansible_shell_type = csh` tells Ansible to build its commands for it;
+  this is required at least when the control node is a FreeBSD host.
+- **Python** is installed by the role under `/usr/local`.
+- **Host key.** MfsBSD generates it at boot, hence the relaxed host key checking.
 
 ## Dependencies
 
